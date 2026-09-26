@@ -4,6 +4,8 @@
 
 **结论：P6-03 继续未验收。** 当前精确五仓的无网络 C3 QEMU 中，Base READY 后一页 64 KiB ABI 2 guest 存活，8-bit heap free／最大连续块为 **65,480／45,056 字节**。真实 FRP 分块 reader 对两条完整 4 KiB AES-GCM 测试记录分别认证成功、逐字节核对 4,096 字节并释放，读数两次都回到 65,480／45,056；篡改 tag 得到 `EFRP_AUTHENTICATION_FAILED=-11`，也完整释放。随后投喂完整 64 KiB 合法测试 wire 时，在 reader 读完 12 字节 nonce 和 4 字节合法长度头后，第 15 个 4 KiB 块申请失败，返回 `EFRP_NO_MEMORY=-20`，已有 14 块全部释放，读数仍回到 65,480／45,056。**这条 READY 后的满长记录未进入密文/tag 认证，不能写成 64 KiB 收发成功。** 同一镜像在 Base 初始化前、guest 已存活时，对完整 64 KiB wire 的认证和 65,536 字节逐字节核对成功；两个时点不可互换。
 
+同一精确镜像的 map、ELF 对象尺寸与源码分配下界见[C3 FRP 与单页 guest 内存账本](c3-frp-guest-memory-budget.md)；账本没有新增运行实验。
+
 | 输入 | 精确源码／收据 |
 | --- | --- |
 | Base | `058e965671fa0e4d417114897541710699571c52`；`git archive \| gzip -n` SHA-256 `5dd4ee1bc055f80e1cbea1029471b167f7ee91eecc0ec0d870728ea3ddd99e1e` |

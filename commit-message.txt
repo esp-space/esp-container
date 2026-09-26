@@ -6,3 +6,4 @@
 - 复测分块 FRP 与 ABI 2 guest 的同镜像记录头分配容量并保存 QEMU 收据
 - 用五仓最新本地提交复测 ABI 2 与分块 FRP 同镜像容量并冻结签名尺寸
 - 验证 ESP32 五组件 ECDSA v1 签名镜像、Kconfig 容量差异和候选三包槽几何
+- 核对 C3 精确五仓 QEMU 的 FRP 会话、TLS 与单页 guest 同存 RAM 下界
