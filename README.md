@@ -65,6 +65,8 @@ host 工具的包格式和使用步骤见 [包工具](tools/README.md)。[只读
 
 [C3 空闲 FRP client QEMU 容量探针](docs/operations/c3-frp-client-qemu-capacity-probe.md)记录真实创建／销毁 API 在一页 guest 存活时的堆占用，以及无会话手工满长认证记录的同存边界。
 
+[C3 OpenETH 与官方 FRPS 会话容量探针](docs/operations/c3-frps-qemu-session-capacity-probe.md)记录 guest 存活时真实 `efrp_start` 在 TLS OPEN 后因 Yamux 对象分配失败而停止的阶段读数；登录、注册、Pong 与会话内满长记录尚未执行。
+
 [双目标 FRP 同存内存下界](docs/operations/dual-target-frp-guest-memory-bound.md)按当前源码逐项计算满长记录与单页 guest 同存时的必要空间；它不替代实际会话和实板验收。
 
 [双目标 4 MiB Flash 容量边界](docs/operations/dual-target-flash-layout-boundary.md)核对当前包格式上界、两块实板各自的旧区保存与双 app 几何，以及首次分区切换必须具备的外部恢复条件；这是离线设计检查点。
