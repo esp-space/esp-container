@@ -63,6 +63,8 @@ host 工具的包格式和使用步骤见 [包工具](tools/README.md)。[只读
 
 [C3 Wi-Fi IRAM 两项开关的 QEMU 容量对照](docs/operations/c3-wifi-iram-qemu-ab.md)记录同输入实验中完整 AEAD reader 与一页 guest 的结果及实际 FRP 会话仍未闭合的内存缺口。
 
+[C3 空闲 FRP client QEMU 容量探针](docs/operations/c3-frp-client-qemu-capacity-probe.md)记录真实创建／销毁 API 在一页 guest 存活时的堆占用，以及无会话手工满长认证记录的同存边界。
+
 [双目标 FRP 同存内存下界](docs/operations/dual-target-frp-guest-memory-bound.md)按当前源码逐项计算满长记录与单页 guest 同存时的必要空间；它不替代实际会话和实板验收。
 
 [双目标 4 MiB Flash 容量边界](docs/operations/dual-target-flash-layout-boundary.md)核对当前包格式上界、两块实板各自的旧区保存与双 app 几何，以及首次分区切换必须具备的外部恢复条件；这是离线设计检查点。

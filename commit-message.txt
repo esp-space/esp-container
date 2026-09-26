@@ -10,3 +10,4 @@
 - 记录 ESP32 五组件签名 QEMU 的单页 guest 与完整 AEAD 动态容量边界
 - 对照 C3 两项 Wi-Fi IRAM 开关的五仓 QEMU 容量并保存完整 AEAD 验证收据
 - 核算双目标 4 MiB 双应用与三包槽的静态上界及首次迁移恢复边界
+- 测量 C3 空闲 FRP client 与单页 guest 和满长认证记录同存的 QEMU 容量
