@@ -78,6 +78,15 @@ def main() -> None:
         assert f"manifest={len(manifest)} wasm_offset=3072 wasm_size={len(wasm)} max_read=512" in valid
         assert hashlib.sha256(package).hexdigest() in valid
         assert hashlib.sha256(wasm).hexdigest() in valid
+        vector = Path(__file__).resolve().parent / "vectors/product-v1"
+        frozen = (vector / "product.pkg").read_bytes()
+        assert hashlib.sha256(frozen).hexdigest() == (
+            "c41930e65d577133a09e7f2105f83faafd63e6d40a3c0af0e3d70aba58907702")
+        frozen_output = run(frozen, key_path=vector / "public-key.der", accepted=True)
+        assert hashlib.sha256(frozen).hexdigest() in frozen_output
+        assert f"manifest={len(manifest)} wasm_offset=3072 wasm_size={len(wasm)} max_read=512" in frozen_output
+        assert pkg.verify_package(frozen, vector / "public-key.pem", "test-key",
+                                  max_wasm_bytes=1024)["product_id"] == "counter"
         assert "result=2" in run(package, key_path=wrong_public)
         run(package, key_id="other-key")
         run(package, cap=7)

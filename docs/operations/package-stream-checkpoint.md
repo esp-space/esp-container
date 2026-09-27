@@ -8,6 +8,8 @@
 
 解析器只接受 host `product_package.py` 生成的规范无压缩 ustar：固定三成员与顺序，逐字节固定 header，零填充、两个结束块与精确 10 KiB record 长度。manifest 按规范 JSON 的固定键顺序和类型读取，拒绝重复/未知字段、非规范编码、越界整数、非小写十六进制摘要和不匹配的 key ID。签名覆盖 `ESP-CONTAINER-PRODUCT-V1\0` 与 manifest 精确字节，RSA-PSS 固定 SHA-256、MGF1-SHA-256、32 字节 salt；公钥不从包中读取。Wasm 按块计算 SHA-256，核对清单长度和摘要；整个归档也按流计算 SHA-256，供上层绑定请求。
 
+2026-09-27 又加入[公开固定签名向量](../../tests/vectors/product-v1/README.md)：10,240 字节真实签名包及同一测试公钥的 PEM／PKCS#1 DER 编码。主机和 C 流式验包回归直接读取这份不可变输入，核对精确 SHA-256、清单、ABI 2 Wasm、签名、512 字节读取上限和重打包字节；临时私钥仅用于生成该向量，未提交。本向量补齐跨实现的公开字节证据，不代替独立产品授权、包槽容量或实体设备验收。
+
 host 测试由主机打包器生成真实临时签名包，以另一个公钥、错误 PSS salt、已签名畸形清单、路径/类型/长度/扩展字段、填充/尾部损坏、截断、不同读取偏移的故障，以及 64 KiB 载荷交叉验证 C 解析器。测试不使用生产密钥，也不写设备。`tests/package_stream_test.py` 通过 CTest 运行。
 
 静态检查接受 ABI v1 与 `wamr-classic-v1`，只允许精确 `econtainer.monotonic_ms() -> i64`、`econtainer.log(i32,i32) -> i32`、`econtainer.timer_start(i32,i32) -> i64` 和 `econtainer.timer_cancel(i64) -> i32` 函数导入，分别要求签名清单声明 `monotonic-time`、`log` 或 `timer`；任一声明还必须落在平台可信能力集合内。重复/未知导入、错误签名、未声明导入和未知能力都拒绝。导出恰好为互不复用的 `econtainer_init() -> i32`、`econtainer_on_event(i32,i32) -> i32`、`econtainer_stop() -> i32` 及非共享 `memory`。Wasm 内存必须有上限且不超过清单需求与平台内存授权，栈需求也不得超过平台授权。扫描拒绝 start、table/element、`target_features`、坏 LEB、截断/乱序/重复 section、越界索引和代码数量不符；WAMR loader 仍负责最终指令与剩余 Wasm 语义验证。扫描尾部再次按流计算 Wasm SHA-256，核对验包结果中的摘要。主机 `product_package.py` 在清单生成、打包和验包时执行相同的可由包字节确定的 Classic/ABI 初筛，但不代替设备的独立授权、Flash 回读和 WAMR 加载。

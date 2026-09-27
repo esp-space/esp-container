@@ -40,4 +40,6 @@ Wasm 初筛只接受 `econtainer.monotonic_ms() -> i64`、`econtainer.log(i32, i
 
 当前 host 编码回归向量使用 `examples/counter/spec.example.json` 的单页清单字段、`tests/wasm_fixture.py` 生成的 171 字节最小有效 Classic ABI 2 模块，以及 `bytes(range(256)) + bytes(range(128))` 作为固定的 384 字节占位签名。生成的规范 manifest 长 546 字节、SHA-256 为 `c64145a7caf097fc29451a8616daa8ad56ff738a9134a5e3d76d4dbe971153d4`；归档长 10,240 字节、SHA-256 为 `8ef5cd8d34db16c5d8919412cbd6c69c0468d696b5a61726f1eb746768e2d71a`。旧的 8 字节空模块不具备设备所需的 ABI section，现已被主机拒绝。占位签名不具备密码学效力，向量仅用于锁住当前主机编码行为；P6-05 的最终包容量与发布签名合同仍待验证。
 
+[公开真实签名向量](../tests/vectors/product-v1/README.md)另以相同清单和 Wasm 保存一份 RSA-3072/PSS 包及主机／设备两种公钥编码。主机与 C 流式验包器均读取该固定包，避免每次随机测试密钥只验证同一轮输入。它使用已销毁的一次性测试私钥，不是设备或发布信任锚。
+
 当前 C3 分支的主机初筛、签名清单和设备回读静态扫描都只接受初始与最大线性内存各一页、清单内存限额 64 KiB 的 guest；私有运行期也固定一页准入，详见[C3 单页切片](../docs/operations/c3-low-memory-profile.md)。当前设备扫描器与 host 初筛仍共同拒绝超过 512 KiB 的 Wasm；`--max-wasm-bytes` 可进一步降低 host 限额，不能提高设备上限。这个 Flash 大小上限不是已冻结的 C3 业务包容量。组件已有[只读流式验包及 Wasm 静态检查切片](../docs/operations/package-stream-checkpoint.md)及候选槽签名包回读准入；设备检查使用验包后得到的签名清单需求，并另外要求平台独立提供能力、内存和栈授权。真实设备分区、完整平台授权和安装链路尚未闭合；本工具的成功结果不能代表设备已可安全安装。

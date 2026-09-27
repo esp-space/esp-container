@@ -99,6 +99,21 @@ class ProductPackageTest(unittest.TestCase):
         self.assertEqual(pkg.unpack(package, max_wasm_bytes=1024),
                          (manifest, signature, WASM))
 
+    def test_public_signed_vector(self) -> None:
+        vector = Path(__file__).resolve().parent / "vectors/product-v1"
+        package = (vector / "product.pkg").read_bytes()
+        self.assertEqual(hashlib.sha256(package).hexdigest(),
+                         "c41930e65d577133a09e7f2105f83faafd63e6d40a3c0af0e3d70aba58907702")
+        self.assertEqual(hashlib.sha256((vector / "public-key.der").read_bytes()).hexdigest(),
+                         "347ceb0689593003efa10f5cc07ecaa00b988962a40f5f9410087ceaab340fb1")
+        manifest, signature, wasm = pkg.unpack(package, max_wasm_bytes=1024)
+        self.assertEqual(manifest, pkg.create_manifest(SPEC, WASM))
+        self.assertEqual(wasm, WASM)
+        self.assertEqual(len(signature), pkg.SIGNATURE_BYTES)
+        self.assertEqual(package, pkg.pack(manifest, signature, wasm, max_wasm_bytes=1024))
+        self.assertEqual(pkg.verify_package(package, vector / "public-key.pem", "test-key",
+                                            max_wasm_bytes=1024)["product_id"], "counter")
+
     def test_payload_mutation_rejected(self) -> None:
         _, _, package = self._package()
         changed = bytearray(package)
