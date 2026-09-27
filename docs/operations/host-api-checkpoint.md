@@ -18,6 +18,24 @@
 
 固定 wasi-sdk 33 与锁定 WAMR 的真 Wasm 测试使用同一 `deadline.wasm` 覆盖两种路径：循环导入时钟跨过期限，下一次导入被拒绝；仅在开头导入日志、随后纯 guest 计算跨过期限，WAMR 返回后拒绝结果。两者均检查 `ENTRY_EXPIRED`、调用方结果未改、实例失败、本次日志不可取及失败实例可关闭。另先成功建立定时器和待取日志，再让后续入口超期，检查失败态拒绝计时轮询且先前日志仍可取。同一 Wasm 对照旧运行期时，超期事件实际返回 `status=0`（`OK`）、`guest_result=0`，新运行期消除了这一误报。主机 Python unittest 18/18、锁定 WAMR CTest 8/8 通过；新版固定 SDK 的 C3 原样样例也完整构建，`runtime.c` 编进组件 archive，app 为 `0x39360` 字节、SHA-256 为 `94672e1d4529a32758b4fbcdfab5ef6fbea1634a243d59dc8a6109aaf3298131`。该样例没有调用私有入口，以上主机测试与构建均不能证明 C3 实板的调用返回时限或未来 SDK 阻塞调用的取消。
 
+## P6-07 真实中断能力复核（2026-09-27）
+
+本轮只核对 `esp-container@3b5f16f01aaf4695b514b1f5f81b21e4abbd85cd`、锁定的 [WAMR `26c235e53e29acd8b43abe7f3b524577bd4d1ae5`](https://github.com/darren-you/wasm-micro-runtime/tree/26c235e53e29acd8b43abe7f3b524577bd4d1ae5) 与当前 C3 profile，没有更改运行源码或设备。固定 wasi-sdk 33 生成 `tests/runtime_guest.c` 的 `init-loop.wasm`、`event-loop.wasm`、`stop-loop.wasm` 和正常 `counter.wasm`。仓外 C 探针沿用 `tests/runtime_instance_test.c` 的运行限制，只把三个入口的指令额度分别设为 `10000000`、`max_entry_duration_ms` 设为 `1`；逐个打开死循环模块，event/stop 先正常 init，再用 `clock_gettime(CLOCK_MONOTONIC)` 测入口调用耗时。每次失败后执行 `close`，立即打开正常 counter 并完成 `init → stop → close`。期望的墙钟硬期限断言是入口在 1 ms 内结束；旧实现的实测结果为：
+
+| 真 Wasm 入口 | 返回码 | 入口耗时 | 失败后关闭与重开 |
+| --- | --- | ---: | --- |
+| init 无限循环 | `INSTRUCTION_LIMIT`（8） | 34 ms | 成功 |
+| event 无限循环 | `INSTRUCTION_LIMIT`（8） | 23 ms | 成功 |
+| stop 无限循环 | `INSTRUCTION_LIMIT`（8） | 20 ms | 成功 |
+
+这些耗时是本机单次读数，不是设备性能指标；可复现的失败事实是三次调用均越过 1 ms 才返回，且先命中指令额度。正数指令预算确实让这三个纯 Wasm 无限循环最终退出，`close` 也能在退出后回收并重开；额度消耗需要的墙钟时间受主机执行与调度影响，不能从指令数推出硬期限。并行 `close` 会被 `call_active` 拒绝，实际销毁仍须由同一 owner 等入口返回后执行，不得强行释放仍被 WAMR 引用的实例。
+
+固定 WAMR 的 [运行构建规则](https://github.com/darren-you/wasm-micro-runtime/blob/26c235e53e29acd8b43abe7f3b524577bd4d1ae5/build-scripts/runtime_lib.cmake)会在启用 lib-pthread、WASI threads 或调试解释器时引入线程管理；当前组件拒绝 guest pthread/调试解释器，C3 `sdkconfig.defaults` 关闭 pthread 和共享内存，主机测试配置也未启用线程管理。`core/config.h` 因此使用 `WASM_ENABLE_THREAD_MGR=0`。在这个精确 profile 中，[`wasm_runtime_terminate`](https://github.com/darren-you/wasm-micro-runtime/blob/26c235e53e29acd8b43abe7f3b524577bd4d1ae5/core/iwasm/common/wasm_runtime_common.c)只写实例异常；无线程管理时异常锁为空操作，[Classic 解释器](https://github.com/darren-you/wasm-micro-runtime/blob/26c235e53e29acd8b43abe7f3b524577bd4d1ae5/core/iwasm/interpreter/wasm_interp_classic.c)也不检查终止标记。不能从该 API 的通用声明推断当前构建可以跨线程安全、及时地终止纯 guest 循环。
+
+当前四个原生导入只读单调时间、复制最多 256 字节日志，或扫描最多八个实例定时器槽；源码没有等待、网络、Flash 或调用方回调，也没有已证实的同步阻塞导入。它们是有限操作，但目前没有在固定 IDF/C3 调度下证明各自的墙钟上界。WAMR 的 [`begin_blocking_op/end_blocking_op`](https://github.com/darren-you/wasm-micro-runtime/blob/26c235e53e29acd8b43abe7f3b524577bd4d1ae5/core/iwasm/common/wasm_blocking_op.c)在无线程管理或没有平台阻塞唤醒支持时为空操作；固定 WAMR 的 ESP-IDF 平台未声明 `OS_ENABLE_WAKEUP_BLOCKING_OP`。因此未来若增加可能阻塞的同步宿主导入，不能靠跨线程 `terminate` 或当前入口的返回后检查保证取消及资源回收。
+
+本轮独立主机构建使用上述精确 WAMR 和 wasi-sdk 33，CTest **9/9**、Python unittest **20/20** 通过；仓外探针在旧实现上两次复现三入口超期，故未把现有事后期限裁决写成硬超时，也没有添加无消费者的异步 worker 或线程强杀。P6-07 的真实入口墙钟有界结束仍未完成。下一步须先在 WAMR 源码边界证明适用于此 Classic profile 的安全中断点及 C3 调度/资源成本，再以精确 WAMR 提交更新组件锁并验证 init/event/stop 和失败回收；任何实际新增的可能阻塞原生操作还需对应 SDK 支持的可取消执行合同，不得预先假设平台可以唤醒它。
+
 ## 2026-09-24 定时器软件切片
 
 平台在运行限制中独立授予 `ECONTAINER_CAP_TIMER`，并设置 `max_timers` 为 1–8；未授权模块在 WAMR 加载前被拒绝。guest 可创建 1–86400000 毫秒后的一次或周期事件，周期为 0 时只触发一次。返回的 64 位句柄来自进程内跨实例单调计数器，取消或关闭后也不复用；用尽 `UINT64_MAX` 后保守拒绝再创建，0 始终无效。取消逐槽核对本实例仍活跃的完整句柄，旧实例和已到期的一次性句柄返回 `-1`。停止先撤销全部定时器，再调用受预算约束的 guest stop，stop 中不能创建新定时器；关闭实例不留下原生计时器回调或后台任务。
