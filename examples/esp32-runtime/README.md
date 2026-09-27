@@ -10,7 +10,7 @@ python3 components/esp_container/tools/check_sdk.py --path "$IDF_PATH"
 idf.py -C examples/esp32-runtime build
 ```
 
-构建后须核对 `dependencies.lock` 的 `target: esp32`、WAMR 完整 SHA、实际 `sdkconfig` 的 target/控制台、app 大小及摘要。这个最小探针不含 Base、FRP、MQTT、OTA、签名业务包或三包槽；其构建成功也不能证明 4 MiB 完整组合容量。[2026-09-26 ESP32 实板检查点](../../docs/operations/development-checkpoint.md#esp32-d0wd-v3-uart0-实板最小探针)记录旧 AT bootloader 下仅写现物应用槽的正常调用、指令额度异常及完整 Flash 恢复。以后每次写板仍须按[五仓主计划](https://github.com/darren-you/darren-space/blob/master/harness/docs/design/darren-space/global/esp-base-frp-mqtt-ota-container-development-plan.md)重新核对设备、两份一致的完整 Flash 恢复基线和当前分区/身份；不得使用本样例单 app `flash_args` 直接覆盖旧 AT 分区表。
+构建后须核对 `dependencies.lock` 的 `target: esp32`、WAMR 完整 SHA、实际 `sdkconfig` 的 target/控制台、app 大小及摘要。这个最小探针不含 Base、FRP、MQTT、OTA、签名业务包或三包槽；其构建成功也不能证明 4 MiB 完整组合容量。[2026-09-26 ESP32 实板检查点](../../docs/operations/development-checkpoint.md#esp32-d0wd-v3-uart0-实板最小探针)记录旧锁的正常调用和指令额度异常；[2026-09-27 Classic 期限双板检查点](../../docs/operations/classic-deadline-probe-checkpoint.md#2026-09-27-旧布局双板实板复验)记录本锁的三项实板结果与完整 Flash 恢复。以后每次写板仍须按[五仓主计划](https://github.com/darren-you/darren-space/blob/master/harness/docs/design/darren-space/global/esp-base-frp-mqtt-ota-container-development-plan.md)重新核对设备、两份一致的完整 Flash 恢复基线和当前分区/身份；不得使用本样例单 app `flash_args` 直接覆盖旧 AT 分区表。
 
 ## 架构拓扑
 

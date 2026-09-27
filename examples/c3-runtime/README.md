@@ -10,7 +10,7 @@ python3 components/esp_container/tools/check_sdk.py --path "$IDF_PATH"
 idf.py -C examples/c3-runtime build
 ```
 
-编译不写板。真实设备实验按工作区五仓开发计划第 1.5、12、13 节执行：每次写入前重新确认精确设备、串口独占、当前固件/配置与两份一致的完整恢复基线，实验后恢复并读回。[2026-09-26 C3 最小探针实板记录](../../docs/operations/development-checkpoint.md#c3-原生-usb-实板最小探针)已完成正常调用、指令额度异常和完整 Flash 恢复。这个独立例子的运行不能替代双固件、三包槽及五组件组合验收。
+编译不写板。真实设备实验按工作区五仓开发计划第 1.5、12、13 节执行：每次写入前重新确认精确设备、串口独占、当前固件/配置与两份一致的完整恢复基线，实验后恢复并读回。[2026-09-26 C3 最小探针实板记录](../../docs/operations/development-checkpoint.md#c3-原生-usb-实板最小探针)完成旧锁的正常调用和指令额度异常；[2026-09-27 Classic 期限双板检查点](../../docs/operations/classic-deadline-probe-checkpoint.md#2026-09-27-旧布局双板实板复验)记录本锁的三项实板结果与完整 Flash 恢复。这个独立例子的运行不能替代双固件、三包槽及五组件组合验收。
 
 ## QEMU 仿真验证
 
