@@ -8,6 +8,8 @@
 flowchart LR
     package["tools/product_package.py"] --> py["test_product_package.py：格式与签名负例"]
     package --> stream["package_stream_test.py：host 签名包 / 畸形包 / 读故障"]
+    vector["vectors/product-v1：固定真实签名包 / 测试公钥"] --> py
+    vector --> stream
     stream --> reader["package_stream_test.c：512 字节只读回调"]
     package --> static["package_wasm_test.py：签名包与 ABI / 授权交叉测试"]
     static --> static_reader["package_wasm_test.c：有界随机读回调"]
@@ -50,7 +52,7 @@ ctest --test-dir build --output-on-failure
 
 设置 `WASI_SDK_ROOT` 为官方 wasi-sdk 33 的解压目录后，Python 测试还会真实编译 counter 两次并比较不同输出路径的字节，验证包扫描接受产物，同时用改坏的函数签名、共享/无界内存、目标特性节和自动 start 作负例。先运行 `python3 tools/counter_guest.py build --wasi-sdk "$WASI_SDK_ROOT" --output dist/app.wasm`，再运行 `build-wamr/wamr_classic_test dist/app.wasm`，可让固定 WAMR Classic loader 实际执行三个 guest 入口；未提供该工具链时，counter 编译测试会明确跳过。
 
-Python 测试使用每次生成的 RSA-3072 临时测试密钥，覆盖确定性归档、签名/错误公钥与错误 PSS 参数、清单顶层及嵌套重复键、未知字段和数值边界、Wasm start/导入白名单/构造入口、导入能力与 manifest 的对应、成员路径/顺序/类型/长度白名单、校验和、成员填充、额外成员、尾随非零或全零块及容量拒绝。固定占位签名的 host 编码回归向量改用最小有效 Classic ABI 模块，摘要见[包工具](../tools/README.md)；占位签名不能用于验签或发布。流式验包 CTest 以真实签名包、独立错误公钥、错误 PSS salt、畸形清单/ustar、断读与 64 KiB 载荷验证 512 字节读取上界。Wasm 静态检查 CTest 使用相同 Wasm 字节对照主机初筛与设备只读检查；旧主机曾接受的 `target_features`、缺失 ABI section、table、element、空导入节、入口签名、代码数量和签名清单内存上限八类负例现均由双方拒绝，并继续覆盖独立授权、坏 LEB/section/重复导入和读故障。设置固定 `WASI_SDK_ROOT` 后还检查真实编译的 counter、时钟/日志与定时器 guest。三槽 CTest 用假 Flash/NVS 注入 commit、读回及部分写入故障，验证 P0→P3 引用保护、两份固件各自重启对账、错误固件集合与超槽容量的擦除前拒绝、候选损坏下的旧包恢复及同 boot 停止证明；联合切换另覆盖签名新固件替换后旧备用包不再受保护、新固件 PREPARED 才允许启动 trial、旧 trial 跨 boot 阻断、无包确认与回退删除绑定。IDF provider CTest 以合成分区表检查缺失/错类型/只读/越界拒绝、绝对 Flash 地址转换、NVS 单 key commit/新 handle 读回，以及单固件集合下的三槽初始化和对账；它没有运行当前 Base 分区布局。C 测试还覆盖组件扫描的正常、截断、start、导入与隐式构造入口。测试密钥只存在系统临时目录，不进入 Git。
+Python 测试使用每次生成的 RSA-3072 临时测试密钥，覆盖确定性归档、签名/错误公钥与错误 PSS 参数、清单顶层及嵌套重复键、未知字段和数值边界、Wasm start/导入白名单/构造入口、导入能力与 manifest 的对应、成员路径/顺序/类型/长度白名单、校验和、成员填充、额外成员、尾随非零或全零块及容量拒绝。固定占位签名的 host 编码回归向量改用最小有效 Classic ABI 模块，摘要见[包工具](../tools/README.md)；占位签名不能用于验签或发布。[公开真实签名向量](vectors/product-v1/README.md)让主机与 C 流式验包器复核同一份既定包字节。流式验包 CTest 还以动态真实签名包、独立错误公钥、错误 PSS salt、畸形清单/ustar、断读与 64 KiB 载荷验证 512 字节读取上界。Wasm 静态检查 CTest 使用相同 Wasm 字节对照主机初筛与设备只读检查；旧主机曾接受的 `target_features`、缺失 ABI section、table、element、空导入节、入口签名、代码数量和签名清单内存上限八类负例现均由双方拒绝，并继续覆盖独立授权、坏 LEB/section/重复导入和读故障。设置固定 `WASI_SDK_ROOT` 后还检查真实编译的 counter、时钟/日志与定时器 guest。三槽 CTest 用假 Flash/NVS 注入 commit、读回及部分写入故障，验证 P0→P3 引用保护、两份固件各自重启对账、错误固件集合与超槽容量的擦除前拒绝、候选损坏下的旧包恢复及同 boot 停止证明；联合切换另覆盖签名新固件替换后旧备用包不再受保护、新固件 PREPARED 才允许启动 trial、旧 trial 跨 boot 阻断、无包确认与回退删除绑定。IDF provider CTest 以合成分区表检查缺失/错类型/只读/越界拒绝、绝对 Flash 地址转换、NVS 单 key commit/新 handle 读回，以及单固件集合下的三槽初始化和对账；它没有运行当前 Base 分区布局。C 测试还覆盖组件扫描的正常、截断、start、导入与隐式构造入口。动态测试私钥只存在系统临时目录，固定向量只提交公钥与签名包。
 
 `package_slot` CTest 将真实临时签名包写入假 Flash 三槽，由槽引擎从实际候选槽回读，再执行签名、Wasm、产品身份、schema 和资源限额检查；错误产品、key ID、schema、内存、队列、指令预算、宿主期限均返回 `UNTRUSTED`，验签和 Wasm 静态扫描的二次读故障分别返回 `IO_FAILED`，均不得进入 PREPARED。联合切换的 REUSE 模式还用同一真实签名包证明新固件独立产品授权失败时不可持久化、通过时不复制 Flash 且只能在确认后共享包槽。`slots` CTest 另覆盖旧备用固件已由 Base 证明不可启动时的 A/B→A 绑定退役、当前序号的 A-only 无写入重入、随后 A/C 准备，以及未决相位、错固件、坏包、commit/读回故障的拒绝。该测试不证明设备真实分区、Base 的 OTA 收据或物理固件集合。
 
