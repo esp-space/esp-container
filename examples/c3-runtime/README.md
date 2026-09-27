@@ -1,8 +1,8 @@
 # ESP32-C3 WAMR Classic 容量与指令预算原型
 
-这个独立 IDF 工程使用两段无 imports、无 start 的标准 Wasm v1 字节：正常函数返回 0，死循环函数验证 1000 条指令额度，只有精确的 `Exception: instruction limit exceeded` 才算额度生效。构建时显式开启 WAMR 指令计量，选择 Classic/Normal loader，并关闭 Fast/AOT/WASI/guest pthread/共享内存与 bulk memory；`esp_container` 组件也在 CMake 配置期拒绝这些 profile 的错误组合。实例化前调用 `econtainer_wasm_check`，防止 WAMR 自动运行 start 或构造导出。运行时打印前后 8-bit heap 和最大连续块。C3 实板只有原生 USB Serial/JTAG 端点，控制台固定使用它；构建后须回读最终 `sdkconfig` 的 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`，不能把 UART0 默认值当作实板可观测入口。
+这个独立 IDF 工程使用两段无 imports、无 start 的标准 Wasm v1 字节：正常函数返回 0，死循环函数验证 1000 条指令额度，只有精确的 `Exception: instruction limit exceeded` 才算额度生效。构建时显式开启 WAMR 指令计量与 Classic 协作式墙钟期限，选择 Classic/Normal loader，并关闭 Fast/AOT/WASI/guest pthread/共享内存与 bulk memory；`esp_container` 组件也在 CMake 配置期拒绝这些 profile 的错误组合。这个最小样例仍只调用指令预算接口，没有设置期限；纯 guest 期限由 Container 运行测试验证。实例化前调用 `econtainer_wasm_check`，防止 WAMR 自动运行 start 或构造导出。运行时打印前后 8-bit heap 和最大连续块。C3 实板只有原生 USB Serial/JTAG 端点，控制台固定使用它；构建后须回读最终 `sdkconfig` 的 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`，不能把 UART0 默认值当作实板可观测入口。
 
-SDK 必须使用跨仓计划锁定的公开 ESP-IDF fork `578cf89c343e388db43ba1f4ddcd602fedcb763c`（直接父提交 `855937cf9dcee13ee9c423fb0319238cdc8d53fd`，官方祖先提交 `fff9895c82d744c7237be8847347bdd1b07c6643`）与 esp-lwip `2758df4cd3666b3b2a5b53830148379326425c0d`。WAMR 由组件清单固定到公开维护 fork 的 `26c235e53e29acd8b43abe7f3b524577bd4d1ae5`；构建后核对 `dependencies.lock` 和 WAMR 源编译 flags，再记录镜像摘要。此工程无 Wi-Fi、MQTT、FRP、OTA、签名包和产品驱动，不能当作完整 Base 容量验收。
+SDK 必须使用跨仓计划锁定的公开 ESP-IDF fork `578cf89c343e388db43ba1f4ddcd602fedcb763c`（直接父提交 `855937cf9dcee13ee9c423fb0319238cdc8d53fd`，官方祖先提交 `fff9895c82d744c7237be8847347bdd1b07c6643`）与 esp-lwip `2758df4cd3666b3b2a5b53830148379326425c0d`。WAMR 由组件清单固定到公开维护 fork 的 `c10736fffdf26d7c2ae234e05aa712df112eb6bf`；构建后核对 `dependencies.lock` 和 WAMR 源编译 flags，再记录镜像摘要。此工程无 Wi-Fi、MQTT、FRP、OTA、签名包和产品驱动，不能当作完整 Base 容量验收。
 
 ```bash
 source "$IDF_PATH/export.sh"

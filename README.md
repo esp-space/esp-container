@@ -32,7 +32,7 @@ flowchart LR
     bridge --> runtime["组件私有单实例运行 API：ABI / 事件复制 / 生命周期"]
     sdk["guest-sdk：精确导入声明"] --> runtime
     runtime --> host["单调时间 / 实例私有待取日志 / 定时器"]
-    runtime --> wamr["锁定 WAMR Classic：加载 / 每入口指令预算"]
+    runtime --> wamr["锁定 WAMR Classic：加载 / 每入口指令预算 / 协作式墙钟期限"]
     sample["examples/c3-runtime / esp32-runtime：双目标独立探针"] --> scanner
     sample --> wamr
     shared["examples/runtime-probe：共用最小运行源码"] --> sample
@@ -40,7 +40,7 @@ flowchart LR
     base["esp-base：未来的平台装配与持久授权"]
 ```
 
-IDF 组件物理路径为 `components/esp_container`，其名称与仓库 `esp-container` 属不同命名空间。公开 Git 消费方须把完整提交 SHA 和 `path: components/esp_container` 写入 `idf_component.yml`。WAMR 由该组件的 manifest 固定到[公开维护 fork](docs/design/source-provenance.md) 的完整修复提交；[SDK 锁](components/esp_container/sdk-lock.json)固定公开 ESP-IDF fork `578cf89c343e388db43ba1f4ddcd602fedcb763c` 与 lwIP 源码，组件构建核对锁定组合。组件配置还要求 Classic/Normal loader、指令计量，并拒绝 WAMR 默认开启的 AOT/Fast/WASI/guest pthread/shrunk memory 等特性；消费者按 [C3 样例](examples/c3-runtime/README.md)或 [ESP32 样例](examples/esp32-runtime/README.md)在 `project()` 前设置计量/bulk/shared/shrunk memory，且在各自 `sdkconfig.defaults` 设置 WAMR Kconfig。两个样例共享同一探针源码，不读取相邻工作区、私有 Tool 或生产凭据。
+IDF 组件物理路径为 `components/esp_container`，其名称与仓库 `esp-container` 属不同命名空间。公开 Git 消费方须把完整提交 SHA 和 `path: components/esp_container` 写入 `idf_component.yml`。WAMR 由该组件的 manifest 固定到[公开维护 fork](docs/design/source-provenance.md) 的完整修复提交；[SDK 锁](components/esp_container/sdk-lock.json)固定公开 ESP-IDF fork `578cf89c343e388db43ba1f4ddcd602fedcb763c` 与 lwIP 源码，组件构建核对锁定组合。组件配置还要求 Classic/Normal loader、指令计量及 Classic 协作式墙钟期限，并拒绝 WAMR 默认开启的 AOT/Fast/WASI/guest pthread/shrunk memory 等特性；消费者按 [C3 样例](examples/c3-runtime/README.md)或 [ESP32 样例](examples/esp32-runtime/README.md)在 `project()` 前设置计量、期限及 bulk/shared/shrunk memory，且在各自 `sdkconfig.defaults` 设置 WAMR Kconfig。两个样例共享同一探针源码，不读取相邻工作区、私有 Tool 或生产凭据。
 
 ## 本机验证
 
@@ -63,7 +63,7 @@ cmake --build build-wamr
 ctest --test-dir build-wamr --output-on-failure
 ```
 
-设置官方 wasi-sdk 33 的 `WASI_SDK_ROOT` 时，`runtime_instance` 会编译真正的 counter、定时器、期限和故障 guest，在锁定 WAMR 上检查单实例、事件复制、ABI、三个入口的额度、逐项导入授权、日志边界、定时器取消与代次隔离、超期成功结果拒绝，以及各 100 次普通、原生导入与失败后重开生命周期。macOS 普通构建还核对第 10/50/100 次关闭后的堆和虚拟地址用量；没有该工具链时仍可运行其余 CTest。详见[运行切片检查点](docs/operations/single-instance-runtime-checkpoint.md)与[宿主导入检查点](docs/operations/host-api-checkpoint.md)。入口期限不抢占同步调用，主机测试不能代替设备上的完整运行。[counter guest 样例](examples/counter/README.md)记录固定编译与静态 ABI/profile 检查入口。
+设置官方 wasi-sdk 33 的 `WASI_SDK_ROOT` 时，`runtime_instance` 会编译真正的 counter、定时器、期限和故障 guest，在锁定 WAMR 上检查单实例、事件复制、ABI、三个入口的指令额度与纯 Wasm 循环期限、逐项导入授权、日志边界、定时器取消与代次隔离、超期成功结果拒绝，以及各 100 次普通、原生导入与失败后重开生命周期。macOS 普通构建还核对第 10/50/100 次关闭后的堆和虚拟地址用量；没有该工具链时仍可运行其余 CTest。详见[运行切片检查点](docs/operations/single-instance-runtime-checkpoint.md)与[宿主导入检查点](docs/operations/host-api-checkpoint.md)。解释器在安全分派点检查期限，调度延迟仍会影响返回耗时；同步原生导入无法在阻塞中被中断。主机测试不能代替设备上的完整运行。[counter guest 样例](examples/counter/README.md)记录固定编译与静态 ABI/profile 检查入口。
 
 host 工具的包格式和使用步骤见 [包工具](tools/README.md)。[只读流式验包与 Wasm 静态检查切片](docs/operations/package-stream-checkpoint.md)记录设备代码与 host 互验边界；静态检查必须接收验包结果及独立可信授权，签名清单只表达需求，不能自行授予设备能力。[三包槽存储检查点](docs/operations/three-slot-storage-checkpoint.md)记录保护集、commit/读回、IDF provider 与恢复软件边界。[C3 单页切片](docs/operations/c3-low-memory-profile.md)记录本分支对 guest、清单、设备扫描与运行期的一页限制。[C3 原型](examples/c3-runtime/README.md)需要固定 SDK；原样 WAMR 2.4.4 与固定 IDF 6.1 的编译问题已在公开 fork 的源码中直接修复，具体构建结果见[开发检查点](docs/operations/development-checkpoint.md)。[五组件仓外容量原型](docs/operations/five-component-capacity-probe.md)记录签名镜像与分区几何，[QEMU counter 容量切片](docs/operations/qemu-counter-capacity-probe.md)记录独立 C3 样例的动态堆采样，[五组件链接 QEMU 容量切片](docs/operations/five-component-qemu-capacity-probe.md)记录 C3 组合读数，[ESP32 五组件签名容量探针](docs/operations/esp32-five-component-capacity-probe.md)记录旧锁的 ECDSA v1 静态镜像与候选几何，[ESP32 认证记录 QEMU 容量探针](docs/operations/esp32-authenticated-qemu-capacity-probe.md)记录新锁的单页 guest 与完整密文动态读数；这些证据均未闭合产品容量验收。本地构建不会写板。当前代码没有可发布的产品包运行/安装链路，不要把验包成功当作设备安全启动。
 

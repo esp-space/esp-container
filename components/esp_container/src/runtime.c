@@ -12,6 +12,9 @@
     WASM_ENABLE_SHRUNK_MEMORY != 0
 #error "Container requires Classic bytecode, standard pages and no retained custom sections"
 #endif
+#if WASM_ENABLE_CLASSIC_WALL_CLOCK_LIMIT == 0
+#error "Container requires the Classic cooperative wall clock limit"
+#endif
 
 #include <stdbool.h>
 #include <stdatomic.h>
@@ -54,7 +57,7 @@ struct econtainer_runtime {
     atomic_bool call_active;
     bool guest_active;
     bool entry_expired;
-    uint64_t entry_deadline_ms;
+    uint64_t entry_deadline_us;
     bool stopping;
     bool natives_registered;
     bool wamr_initialized;
@@ -223,6 +226,7 @@ static bool claim_call(econtainer_runtime_t *runtime)
     return atomic_compare_exchange_strong(&runtime->call_active, &expected, true);
 }
 
+static bool monotonic_us(uint64_t *result);
 static bool monotonic_ms(uint64_t *result);
 
 static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
@@ -237,13 +241,13 @@ static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
                                    "Exception: invalid container host call owner");
         return NULL;
     }
-    uint64_t now_ms = 0;
-    if (!monotonic_ms(&now_ms)) {
+    uint64_t now_us = 0;
+    if (!monotonic_us(&now_us)) {
         wasm_runtime_set_exception(runtime->instance,
                                    "Exception: monotonic clock failed");
         return NULL;
     }
-    if (now_ms >= runtime->entry_deadline_ms) {
+    if (now_us >= runtime->entry_deadline_us) {
         runtime->entry_expired = true;
         wasm_runtime_set_exception(runtime->instance,
                                    ECONTAINER_ENTRY_EXPIRED_REASON);
@@ -252,17 +256,28 @@ static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
     return runtime;
 }
 
-static bool monotonic_ms(uint64_t *result)
+static bool monotonic_us(uint64_t *result)
 {
 #ifdef ESP_PLATFORM
     const int64_t now_us = esp_timer_get_time();
     if (now_us < 0) return false;
-    *result = (uint64_t)now_us / 1000U;
+    *result = (uint64_t)now_us;
 #else
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0) return false;
-    *result = (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+    const uint64_t fractional_us = (uint64_t)now.tv_nsec / 1000U;
+    if ((uint64_t)now.tv_sec > (UINT64_MAX - fractional_us) / 1000000U)
+        return false;
+    *result = (uint64_t)now.tv_sec * 1000000U + fractional_us;
 #endif
+    return true;
+}
+
+static bool monotonic_ms(uint64_t *result)
+{
+    uint64_t now_us = 0;
+    if (!monotonic_us(&now_us)) return false;
+    *result = now_us / 1000U;
     return true;
 }
 
@@ -592,25 +607,33 @@ static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
                                           int32_t budget, uint32_t argc,
                                           uint32_t *arguments, int32_t *result)
 {
-    uint64_t began_ms = 0;
-    if (!monotonic_ms(&began_ms) ||
-        began_ms > UINT64_MAX - runtime->limits.max_entry_duration_ms) {
+    uint64_t began_us = 0;
+    const uint64_t duration_us =
+        (uint64_t)runtime->limits.max_entry_duration_ms * 1000U;
+    if (!monotonic_us(&began_us) ||
+        began_us > UINT64_MAX - duration_us) {
         runtime->state = ECONTAINER_RUNTIME_FAILED;
         return ECONTAINER_RUNTIME_ENGINE_FAILURE;
     }
     const size_t prior_log_size = runtime->pending_log_size;
-    runtime->entry_deadline_ms = began_ms + runtime->limits.max_entry_duration_ms;
+    runtime->entry_deadline_us = began_us + duration_us;
     runtime->entry_expired = false;
     wasm_runtime_clear_exception(runtime->instance);
     wasm_runtime_set_instruction_count_limit(runtime->environment, budget);
+    wasm_runtime_set_classic_wall_clock_deadline_us(
+        runtime->environment, runtime->entry_deadline_us);
     runtime->guest_active = true;
     const bool call_ok = wasm_runtime_call_wasm(runtime->environment, function,
                                                 argc, arguments);
     runtime->guest_active = false;
+    wasm_runtime_set_classic_wall_clock_deadline_us(runtime->environment, 0);
     if (runtime->entry_expired)
         return expire_entry(runtime, prior_log_size);
     if (!call_ok) {
         const char *exception = wasm_runtime_get_exception(runtime->instance);
+        if (exception != NULL &&
+            strcmp(exception, "Exception: wall clock deadline exceeded") == 0)
+            return expire_entry(runtime, prior_log_size);
         runtime->state = ECONTAINER_RUNTIME_FAILED;
         return exception != NULL &&
                        strcmp(exception, "Exception: instruction limit exceeded") == 0
@@ -621,12 +644,12 @@ static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
         runtime->state = ECONTAINER_RUNTIME_FAILED;
         return ECONTAINER_RUNTIME_ENGINE_FAILURE;
     }
-    uint64_t ended_ms = 0;
-    if (!monotonic_ms(&ended_ms)) {
+    uint64_t ended_us = 0;
+    if (!monotonic_us(&ended_us)) {
         runtime->state = ECONTAINER_RUNTIME_FAILED;
         return ECONTAINER_RUNTIME_ENGINE_FAILURE;
     }
-    if (ended_ms >= runtime->entry_deadline_ms)
+    if (ended_us >= runtime->entry_deadline_us)
         return expire_entry(runtime, prior_log_size);
     *result = (int32_t)arguments[0];
     return ECONTAINER_RUNTIME_OK;

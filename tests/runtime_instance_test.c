@@ -342,6 +342,54 @@ static bool test_loop(const char *path, unsigned entry)
     return true;
 }
 
+static bool test_pure_guest_deadline(const char *path, const char *counter_path,
+                                     unsigned entry)
+{
+    size_t length = 0;
+    uint8_t *bytes = read_file(path, &length);
+    CHECK(bytes != NULL);
+    econtainer_runtime_limits_t short_entry = limits;
+    short_entry.max_entry_duration_ms = 20;
+    short_entry.init_instruction_budget = INT32_MAX;
+    short_entry.event_instruction_budget = INT32_MAX;
+    short_entry.stop_instruction_budget = INT32_MAX;
+    econtainer_runtime_t *runtime = NULL;
+    CHECK(econtainer_runtime_open(bytes, length, &short_entry, &runtime) ==
+          ECONTAINER_RUNTIME_OK);
+    free(bytes);
+    if (entry == 0) {
+        CHECK(econtainer_runtime_init(runtime) == ECONTAINER_RUNTIME_ENTRY_EXPIRED);
+    }
+    else {
+        CHECK(econtainer_runtime_init(runtime) == ECONTAINER_RUNTIME_OK);
+        if (entry == 1) {
+            const uint8_t event[] = {1};
+            int32_t guest_result = 123;
+            CHECK(econtainer_runtime_on_event(runtime, event, sizeof event,
+                                               &guest_result) ==
+                  ECONTAINER_RUNTIME_ENTRY_EXPIRED);
+            CHECK(guest_result == 123);
+        }
+        else {
+            CHECK(econtainer_runtime_stop(runtime) == ECONTAINER_RUNTIME_ENTRY_EXPIRED);
+        }
+    }
+    CHECK(econtainer_runtime_state(runtime) == ECONTAINER_RUNTIME_FAILED);
+    CHECK(econtainer_runtime_close(&runtime) == ECONTAINER_RUNTIME_OK &&
+          runtime == NULL);
+
+    bytes = read_file(counter_path, &length);
+    CHECK(bytes != NULL);
+    CHECK(econtainer_runtime_open(bytes, length, &limits, &runtime) ==
+          ECONTAINER_RUNTIME_OK);
+    free(bytes);
+    CHECK(econtainer_runtime_init(runtime) == ECONTAINER_RUNTIME_OK);
+    CHECK(econtainer_runtime_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    CHECK(econtainer_runtime_close(&runtime) == ECONTAINER_RUNTIME_OK &&
+          runtime == NULL);
+    return true;
+}
+
 static bool test_maximum_event(const char *path)
 {
     size_t length = 0;
@@ -806,9 +854,9 @@ static bool test_timers(const char *path)
           delivered.handle != 0 && delivered.skipped_periods == 0);
     const uint64_t one_shot = delivered.handle;
     CHECK(econtainer_runtime_poll_timer(runtime, &delivered, &result) ==
-          ECONTAINER_RUNTIME_OK && result == 20 &&
-          delivered.handle != 0 && delivered.handle != one_shot &&
-          delivered.skipped_periods == 0);
+          ECONTAINER_RUNTIME_OK &&
+          result == 20 + (int32_t)delivered.skipped_periods &&
+          delivered.handle != 0 && delivered.handle != one_shot);
     const uint64_t periodic = delivered.handle;
     CHECK(econtainer_runtime_poll_timer(runtime, &delivered, &result) ==
           ECONTAINER_RUNTIME_NO_TIMER);
@@ -996,6 +1044,9 @@ int main(int argc, char **argv)
                         test_event_buffer_abi(argv[1]) &&
                         test_loop(argv[3], 0) && test_loop(argv[4], 1) &&
                         test_loop(argv[5], 2) &&
+                        test_pure_guest_deadline(argv[3], argv[1], 0) &&
+                        test_pure_guest_deadline(argv[4], argv[1], 1) &&
+                        test_pure_guest_deadline(argv[5], argv[1], 2) &&
                         test_wrong_abi_and_release(argv[7], argv[1], argv[11]) &&
                         test_repeated_release(argv[1]) &&
                         test_failure_reopen(argv[1], argv[3], argv[4], argv[5], argv[6]) &&

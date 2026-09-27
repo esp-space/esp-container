@@ -10,7 +10,8 @@ if(NOT CMAKE_BUILD_EARLY_EXPANSION)
        CONFIG_WAMR_ENABLE_LIBC_BUILTIN OR CONFIG_WAMR_ENABLE_LIBC_WASI OR
        CONFIG_WAMR_ENABLE_LIB_PTHREAD OR CONFIG_WAMR_ENABLE_MULTI_MODULE OR
        CONFIG_WAMR_ENABLE_SHARED_MEMORY OR CONFIG_WAMR_ENABLE_REF_TYPES OR
-       NOT WAMR_BUILD_INSTRUCTION_METERING OR WAMR_BUILD_AOT OR
+       NOT WAMR_BUILD_INSTRUCTION_METERING OR
+       NOT WAMR_BUILD_CLASSIC_WALL_CLOCK_LIMIT OR WAMR_BUILD_AOT OR
        WAMR_BUILD_FAST_INTERP OR WAMR_BUILD_MINI_LOADER OR
        WAMR_BUILD_LIBC_BUILTIN OR WAMR_BUILD_LIBC_WASI OR
        WAMR_BUILD_LIB_PTHREAD OR WAMR_BUILD_MULTI_MODULE OR
@@ -20,7 +21,7 @@ if(NOT CMAKE_BUILD_EARLY_EXPANSION)
        WAMR_BUILD_DEBUG_INTERP OR WAMR_BUILD_CUSTOM_NAME_SECTION OR
        WAMR_BUILD_LOAD_CUSTOM_SECTION OR
        NOT DEFINED WAMR_BUILD_SHRUNK_MEMORY OR WAMR_BUILD_SHRUNK_MEMORY)
-        message(FATAL_ERROR "ESP Container requires WAMR Classic/normal loader with instruction metering and no retained custom sections; AOT/Fast/WASI/pthread/multi-module/ref-types/SIMD/bulk/shared memory/debug and shrunk memory must be disabled. Use examples/c3-runtime/sdkconfig.defaults and its CMake profile before project()")
+        message(FATAL_ERROR "ESP Container requires WAMR Classic/normal loader with instruction metering and cooperative wall clock limit and no retained custom sections; AOT/Fast/WASI/pthread/multi-module/ref-types/SIMD/bulk/shared memory/debug and shrunk memory must be disabled. Use examples/c3-runtime/sdkconfig.defaults and its CMake profile before project()")
     endif()
     idf_build_get_property(sdk_python PYTHON)
     idf_build_get_property(sdk_path IDF_PATH)
@@ -32,3 +33,4 @@ if(NOT CMAKE_BUILD_EARLY_EXPANSION)
     endif()
 endif()
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE WASM_ENABLE_CLASSIC_WALL_CLOCK_LIMIT=1)
