@@ -2,6 +2,7 @@
 #include "nvs.h"
 
 #include <assert.h>
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -405,6 +406,126 @@ static void test_slot_engine_with_idf_provider(void)
     assert(erases == 0 && writes == 0);
 }
 
+static bool stopped_confirmed_instance(void *context,
+                                       const econtainer_slot_binding_t *binding)
+{
+    const uint8_t *expected_digest = context;
+    return storage_lock.held && binding->present && binding->package_present &&
+           binding->slot == 1U && binding->firmware_sha256[0] == 0x22 &&
+           memcmp(binding->package_sha256, expected_digest, 32) == 0;
+}
+
+static econtainer_slot_firmware_set_t two_firmware_set(uint8_t running)
+{
+    econtainer_slot_firmware_set_t result = {0};
+    result.bootable_count = 2;
+    memset(result.bootable_firmware_sha256[0], 0x11, 32);
+    memset(result.bootable_firmware_sha256[1], 0x22, 32);
+    memset(result.running_firmware_sha256, running, 32);
+    return result;
+}
+
+static void initialize_two_package_bindings(econtainer_slots_idf_provider_t *provider)
+{
+    econtainer_slots_idf_config_t selected = config();
+    assert(econtainer_slots_idf_bind(provider, &selected));
+    econtainer_slot_binding_t bindings[ECONTAINER_SLOT_BINDING_COUNT] = {0};
+    for (unsigned index = 0; index < ECONTAINER_SLOT_BINDING_COUNT; ++index) {
+        uint8_t *package = flash + index * SECTOR_BYTES;
+        for (unsigned byte = 0; byte < 64U; ++byte) {
+            package[byte] = (uint8_t)(index * 61U + byte * 3U);
+        }
+        bindings[index].present = true;
+        memset(bindings[index].firmware_sha256, index == 0U ? 0x11 : 0x22, 32);
+        bindings[index].package_present = true;
+        bindings[index].slot = (uint8_t)index;
+        assert(SHA256(package, 64U, bindings[index].package_sha256) != NULL);
+        bindings[index].package_size_bytes = 64U;
+        bindings[index].guest_abi_version = 2U;
+        bindings[index].data_schema_version = 1U;
+    }
+    const econtainer_slot_firmware_set_t set = two_firmware_set(0x22);
+    assert(econtainer_slots_initialize(&provider->io, &provider->geometry,
+                                       &set, bindings) == ECONTAINER_SLOTS_OK);
+}
+
+static void test_provider_product_uninstall_and_rollback(void)
+{
+    econtainer_slots_idf_provider_t provider;
+    initialize_two_package_bindings(&provider);
+    const econtainer_slot_firmware_set_t running = two_firmware_set(0x22);
+    const econtainer_slot_firmware_set_t fallback = two_firmware_set(0x11);
+    econtainer_slots_state_t state;
+    assert(econtainer_slots_load(&provider.io, &provider.geometry, &state) == ECONTAINER_SLOTS_OK);
+    uint8_t old_flash[PACKAGE_BYTES];
+    memcpy(old_flash, flash, sizeof old_flash);
+    uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES] = {0x43};
+    uint8_t digest[32];
+    assert(SHA256(flash + SECTOR_BYTES, 64U, digest) != NULL);
+    const unsigned original_commits = commits;
+    const unsigned original_erases = erases, original_writes = writes;
+    assert(econtainer_slots_uninstall(&provider.io, &provider.geometry,
+        state.sequence, &running, operation_id, digest,
+        stopped_confirmed_instance, digest, &state) == ECONTAINER_SLOTS_OK);
+    assert(commits == original_commits + 1U &&
+           erases == original_erases && writes == original_writes &&
+           memcmp(flash, old_flash, sizeof flash) == 0);
+    assert(!state.bindings[1].package_present && state.bindings[0].package_present &&
+           state.operation.kind == ECONTAINER_SLOT_NO_PACKAGE &&
+           !state.operation.firmware_transition);
+
+    /* A new provider handle after a simulated restart observes the committed
+     * empty running binding and the intact rollback package. */
+    econtainer_slots_idf_config_t selected = config();
+    econtainer_slots_idf_provider_t restarted;
+    assert(econtainer_slots_idf_bind(&restarted, &selected));
+    assert(econtainer_slots_load(&restarted.io, &restarted.geometry,
+                                 &state) == ECONTAINER_SLOTS_OK);
+    econtainer_slot_boot_decision_t decision = ECONTAINER_SLOT_BOOT_BLOCKED;
+    assert(econtainer_slots_reconcile(&restarted.io, &restarted.geometry,
+        &running, &state, &decision) == ECONTAINER_SLOTS_OK &&
+        decision == ECONTAINER_SLOT_BOOT_CONFIRMED);
+    assert(econtainer_slots_reconcile(&restarted.io, &restarted.geometry,
+        &fallback, &state, &decision) == ECONTAINER_SLOTS_OK &&
+        decision == ECONTAINER_SLOT_BOOT_CONFIRMED &&
+        state.bindings[0].package_present && state.bindings[0].slot == 0U);
+    assert(memcmp(flash, old_flash, sizeof flash) == 0 &&
+           erases == original_erases && writes == original_writes);
+}
+
+static void test_provider_uninstall_commit_uncertainty(void)
+{
+    econtainer_slots_idf_provider_t provider;
+    initialize_two_package_bindings(&provider);
+    const econtainer_slot_firmware_set_t running = two_firmware_set(0x22);
+    econtainer_slots_state_t state;
+    assert(econtainer_slots_load(&provider.io, &provider.geometry, &state) == ECONTAINER_SLOTS_OK);
+    const uint32_t original_sequence = state.sequence;
+    uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES] = {0x44};
+    uint8_t digest[32];
+    assert(SHA256(flash + SECTOR_BYTES, 64U, digest) != NULL);
+    fail_commit = true;
+    assert(econtainer_slots_uninstall(&provider.io, &provider.geometry,
+        original_sequence, &running, operation_id, digest,
+        stopped_confirmed_instance, digest, &state) == ECONTAINER_SLOTS_IO_FAILED);
+    assert(econtainer_slots_load(&provider.io, &provider.geometry, &state) == ECONTAINER_SLOTS_OK &&
+           state.sequence == original_sequence && state.bindings[1].package_present);
+    commit_then_fail = true;
+    assert(econtainer_slots_uninstall(&provider.io, &provider.geometry,
+        original_sequence, &running, operation_id, digest,
+        stopped_confirmed_instance, digest, &state) == ECONTAINER_SLOTS_UNCERTAIN);
+    fail_commit = commit_then_fail = false;
+    econtainer_slots_idf_config_t selected = config();
+    econtainer_slots_idf_provider_t restarted;
+    assert(econtainer_slots_idf_bind(&restarted, &selected));
+    assert(econtainer_slots_load(&restarted.io, &restarted.geometry,
+                                 &state) == ECONTAINER_SLOTS_OK);
+    assert(state.sequence == original_sequence + 1U && !state.bindings[1].package_present &&
+           state.bindings[0].package_present &&
+           memcmp(state.operation.operation_id, operation_id, sizeof operation_id) == 0);
+    assert(erases == 0U && writes == 0U);
+}
+
 int main(void)
 {
     reset();
@@ -415,6 +536,10 @@ int main(void)
     test_provider_mapping();
     reset();
     test_slot_engine_with_idf_provider();
+    reset();
+    test_provider_product_uninstall_and_rollback();
+    reset();
+    test_provider_uninstall_commit_uncertainty();
     reset();
     package_partition.encrypted = true;
     econtainer_slots_idf_config_t selected = config();

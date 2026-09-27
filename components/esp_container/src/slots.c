@@ -142,7 +142,9 @@ static bool operation_valid(const econtainer_slots_state_t *state,
         all_zero(operation->target_firmware_sha256, 32) ||
         operation->kind > ECONTAINER_SLOT_NO_PACKAGE ||
         (operation->kind != ECONTAINER_SLOT_PACKAGE_WRITE &&
-         !operation->firmware_transition)) {
+         !operation->firmware_transition &&
+         !(operation->kind == ECONTAINER_SLOT_NO_PACKAGE &&
+           state->phase == ECONTAINER_SLOT_CONFIRMED))) {
         return false;
     }
     const bool has_package = operation->kind != ECONTAINER_SLOT_NO_PACKAGE;
@@ -191,6 +193,11 @@ static bool operation_valid(const econtainer_slots_state_t *state,
          state->phase != ECONTAINER_SLOT_CONFIRMED && target->package_present) ||
         (operation->kind == ECONTAINER_SLOT_PACKAGE_REUSE && !reused_confirmed)) return false;
     if (state->phase == ECONTAINER_SLOT_WRITING || state->phase == ECONTAINER_SLOT_PREPARED) {
+        return all_zero(operation->trial_boot_id, sizeof(operation->trial_boot_id));
+    }
+    if (state->phase == ECONTAINER_SLOT_CONFIRMED &&
+        operation->kind == ECONTAINER_SLOT_NO_PACKAGE &&
+        !operation->firmware_transition) {
         return all_zero(operation->trial_boot_id, sizeof(operation->trial_boot_id));
     }
     if (state->phase == ECONTAINER_SLOT_TRIAL_STARTED ||
@@ -1147,6 +1154,85 @@ econtainer_slots_result_t econtainer_slots_write_and_prepare(
         econtainer_slots_state_t next = current;
         next.phase = ECONTAINER_SLOT_PREPARED;
         result = commit_next(io, geometry, &current, &next, state);
+    }
+    io->unlock(io->context);
+    return result;
+}
+
+econtainer_slots_result_t econtainer_slots_uninstall(
+    const econtainer_slots_io_t *io, const econtainer_slots_geometry_t *geometry,
+    uint32_t expected_sequence, const econtainer_slot_firmware_set_t *firmware_set,
+    const uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES],
+    const uint8_t expected_package_sha256[32],
+    econtainer_slot_instance_stopped_fn instance_stopped_fn, void *instance_context,
+    econtainer_slots_state_t *state)
+{
+    if (!io_valid(io) || !econtainer_slots_geometry_valid(geometry) ||
+        !firmware_set_valid(firmware_set) || operation_id == NULL ||
+        all_zero(operation_id, ECONTAINER_SLOT_OPERATION_ID_BYTES) ||
+        expected_package_sha256 == NULL || all_zero(expected_package_sha256, 32) ||
+        instance_stopped_fn == NULL || state == NULL) {
+        return ECONTAINER_SLOTS_INVALID;
+    }
+    if (!io->lock(io->context)) return ECONTAINER_SLOTS_BUSY;
+    econtainer_slots_state_t current;
+    econtainer_slots_result_t result = begin_locked(io, geometry, expected_sequence, &current);
+    if (result == ECONTAINER_SLOTS_OK &&
+        !firmware_set_matches(&current, firmware_set)) {
+        result = ECONTAINER_SLOTS_CONFLICT;
+    }
+    if (result == ECONTAINER_SLOTS_OK &&
+        current.phase != ECONTAINER_SLOT_IDLE &&
+        current.phase != ECONTAINER_SLOT_CONFIRMED &&
+        current.phase != ECONTAINER_SLOT_ABORTED) {
+        result = ECONTAINER_SLOTS_BUSY;
+    }
+    if (result == ECONTAINER_SLOTS_OK &&
+        current.operation.firmware_transition &&
+        ((current.phase == ECONTAINER_SLOT_CONFIRMED &&
+          memcmp(current.operation.target_firmware_sha256,
+                 firmware_set->running_firmware_sha256, 32) != 0) ||
+         current.phase == ECONTAINER_SLOT_ABORTED)) {
+        result = ECONTAINER_SLOTS_CONFLICT;
+    }
+    if (result == ECONTAINER_SLOTS_OK && current.phase != ECONTAINER_SLOT_IDLE &&
+        memcmp(current.operation.operation_id, operation_id,
+               ECONTAINER_SLOT_OPERATION_ID_BYTES) == 0) {
+        result = ECONTAINER_SLOTS_CONFLICT;
+    }
+    const int index = result == ECONTAINER_SLOTS_OK ?
+        binding_for_firmware(&current, firmware_set->running_firmware_sha256) : -1;
+    if (result == ECONTAINER_SLOTS_OK) {
+        if (index < 0 || !current.bindings[index].package_present ||
+            memcmp(current.bindings[index].package_sha256,
+                   expected_package_sha256, 32) != 0) {
+            result = ECONTAINER_SLOTS_CONFLICT;
+        }
+    }
+    if (result == ECONTAINER_SLOTS_OK) {
+        econtainer_slots_state_t next = current;
+        econtainer_slot_binding_t *binding = &next.bindings[index];
+        binding->package_present = false;
+        binding->slot = 0;
+        memset(binding->package_sha256, 0, sizeof(binding->package_sha256));
+        binding->package_size_bytes = 0;
+        binding->guest_abi_version = 0;
+        binding->data_schema_version = 0;
+        next.phase = ECONTAINER_SLOT_CONFIRMED;
+        next.operation = (econtainer_slot_operation_t){0};
+        memcpy(next.operation.operation_id, operation_id,
+               ECONTAINER_SLOT_OPERATION_ID_BYTES);
+        memcpy(next.operation.target_firmware_sha256,
+               firmware_set->running_firmware_sha256, 32);
+        next.operation.kind = ECONTAINER_SLOT_NO_PACKAGE;
+        result = check_references(io, geometry, &next, false);
+        if (result == ECONTAINER_SLOTS_OK &&
+            !instance_stopped_fn(instance_context, &current.bindings[index])) {
+            result = ECONTAINER_SLOTS_BUSY;
+        }
+        if (result == ECONTAINER_SLOTS_OK) {
+            result = commit_next(io, geometry, &current, &next, state);
+        }
     }
     io->unlock(io->context);
     return result;

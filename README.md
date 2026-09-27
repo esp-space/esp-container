@@ -2,6 +2,8 @@
 
 `esp-container` 是面向 ESP-IDF 的业务包运行组件。当前提供独立 `esp_container` IDF 组件、受限 Wasm 扫描器、counter guest 的固定 freestanding 构建与静态检查、公开 guest SDK 草案、确定性 ustar 打包与 RSA-3072/PSS 验包工具、只读回调式设备验包及 Wasm ABI/能力检查切片、三槽原始 Flash 存储软件切片、双固件集合对账与联合固件/包切换的单 blob 状态合同、精确分区前置的 ESP-IDF Flash/NVS provider，以及 WAMR Classic 单实例运行切片。三槽候选回读组合签名包、Wasm 与独立产品/配额授权；公开产品生命周期入口仅从实际确认绑定或本 boot 的精确试运行记录装载，组件内部在同一槽锁下重新验包授权、短时映射并完成 WAMR 装载，裸 Wasm 装载仍是私有接口。运行期使用 ABI 2 的页内事件区，保持完整 64 KiB 标准内存边界，并提供逐项授权的单调时间、有界日志和受配额定时器导入。实际专用包分区、完整签名包安装、Base 联合升级与实板容量尚未完成，当前代码只可作为研发检查点。
 
+`econtainer_slots_uninstall` 可在 Base 停止并回收当前确认实例后，以精确包摘要和固件集合清除当前固件的包绑定。它持久读回 `NO_PACKAGE` 终态，保留回退固件绑定和包 Flash 字节；Base 的卸载命令与运行重启仍待接入。详见[三包槽存储检查点](docs/operations/three-slot-storage-checkpoint.md)。
+
 ## 架构拓扑
 
 ```mermaid
@@ -18,7 +20,7 @@ flowchart LR
     base -->|"独立可信授权"| scanner
     base -->|"实际可启动固件集合"| slots
     ota["esp-ota：签名镜像写入 / 启动选择 / VALID"] --> base
-    base -->|"联合切换状态：stage / trial / confirm"| slots
+    base -->|"联合切换状态：stage / trial / confirm；当前包清除：uninstall"| slots
     slot_tests["slots_test.c：假 Flash / NVS 故障注入"] --> slots["esp_container：三槽保护 / 单 blob 对账"]
     slots --> slot_callbacks["调用方 Flash / NVS 回调接口"]
     idf_provider["slots_idf：精确专用分区 / NVS 接线"] --> slot_callbacks

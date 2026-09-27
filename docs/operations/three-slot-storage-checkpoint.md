@@ -15,6 +15,16 @@
 - 启动对账 `reconcile` 先重新计算两份确认包摘要。product-only 未决操作继续返回旧确认绑定；联合固件操作在旧固件运行时也只允许恢复旧确认包，在新固件运行且状态为 `PREPARED` 时明确返回 `BOOT_START_TRIAL`，由 Base 生成本 boot ID 并先提交 `TRIAL_STARTED`。新固件运行但包仍在 `WRITING`、旧 trial 已跨 boot、已取消，或新固件确认后却运行旧固件，均返回 `CONFLICT/BOOT_BLOCKED`。候选损坏在旧固件运行时保留原始 `UNTRUSTED`/`IO_FAILED` 与 `BOOT_RECOVER_CONFIRMED_CANDIDATE_INVALID`；在新固件运行时保持 `BOOT_BLOCKED`。确认包错误也始终阻断。
 - `abandon` 为显式取消。不同 boot 可直接证明 RAM 中不存在前次试运行实例；同一 boot 必须由唯一执行器 owner 在持有存储锁期间调用 `trial_stopped_fn`，核对该 operation 的候选已停止、回调/原生引用已收敛。取消只依赖确认包完整性，被抛弃的候选字节即使损坏也不妨碍持久取消。取消后的新操作仍须取得不同 operation ID，并重新执行授权/验包。调用方在启动旧包前仍须验证签名、ABI、授权、数据 schema 和运行能力。
 
+## 当前固件包绑定清除
+
+`econtainer_slots_uninstall` 是 product-only 的持久转换：Base 必须持有 app/package 串行所有权，先确认当前选中固件的 OTA 收据已经收敛，再停止并回收当前已确认实例，然后提供真实可启动固件集合、当前序号、全新 operation ID 和预期包 SHA-256。唯一执行器的 `instance_stopped_fn` 在包槽锁内核对被清除的精确绑定已停止且没有原生引用；回调不得重新进入槽 API。当前固件没有该包、固件集合或序号变化、未决 trial、Container 联合固件转换未收敛时均拒绝。Container 无法自行读取 Base 的 OTA 收据；此 API 不承担命令授权、实例调度和跨历史 operation ID 的账本。
+
+转换在原 ECS2 blob 中只清当前运行固件的包字段，保留固件摘要、另一可启动固件的绑定、包 Flash 全部字节与产品数据。提交前重新计算转换后仍被引用的全部包 SHA-256；损坏的待卸载包可移除，但损坏的回退包不得被宣称可恢复。成功时 `CONFIRMED + NO_PACKAGE + firmware_transition=false` 保存本次 operation ID，且 trial boot ID 为空。Base 可在独立读回后把它作为卸载结果；当前固件重启对账取得无包确认绑定，回退固件仍能对账到原包。无引用的旧包槽只能在后续新操作先持久预留后被擦写，卸载本身不擦槽。
+
+NVS 写前失败且读回仍是旧 blob 返回 `IO_FAILED`；commit 可能已生效但返回失败，或写后读回失败，返回 `UNCERTAIN`。Base 必须在重新装载持久记录后按序号、operation ID、固件摘要与包绑定判定结果，不能将不确定返回视为卸载成功或立即重试擦写。现有 `slots_test` 和真实 `slots_idf.c` provider 假 SDK 集成测试覆盖这两种提交边界、重新绑定 provider 后的状态读回及回退引用保护；它们不代表 Base 已具备命令入口或物理掉电证明。
+
+截至本切片，Base 的 V2 OTA 收据若为 `SUCCEEDED` 且仍选中 C，每次启动仍要求 ECS2 保留那次联合 OTA 的原 operation ID、`firmware_transition` 和精确 sequence。清除绑定会替换这条最近操作记录，使下次启动阻断；后续 product-only 安装也有同样问题。因此 Base 在接入此 API 前必须把 `PREPARED` 收据的严格恢复与 `SUCCEEDED` 收据之后的正常 ECS2 对账区分，并验证后续包操作的重启状态。此处的 Container API 和主机测试仅证明局部存储转换，不构成 Base 可消费或设备可发布的卸载功能。
+
 ## 双固件集合对账软件切片
 
 `initialize`、`reconcile` 和 `reserve` 接受同一 `econtainer_slot_firmware_set_t`：一或两份实际可启动固件 SHA-256，以及其中正在运行的一份。集合不区分数组顺序；零摘要、重复、越界计数、运行固件不在集合均拒绝。已提交 blob 中的固件绑定必须与集合完全一致；旧固件已被 OTA 覆盖却仍留在绑定中，或新固件出现却没有绑定，启动选择返回 `BOOT_BLOCKED`，擦槽预留返回 `CONFLICT`。这不会自动删除旧包或把新固件判作已确认。摘要校验继续覆盖两份绑定，因此从当前固件启动也不能忽略回退固件的包损坏。

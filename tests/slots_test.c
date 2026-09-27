@@ -184,6 +184,24 @@ static bool trial_stopped_proof(void *context,
     return store->locked && store->trial_stopped && operation_id[0] == 2;
 }
 
+typedef struct {
+    fake_store_t *store;
+    uint8_t package_sha256[32];
+    bool stopped;
+    unsigned calls;
+} uninstall_proof_t;
+
+static bool instance_stopped_proof(void *context,
+                                   const econtainer_slot_binding_t *binding)
+{
+    uninstall_proof_t *proof = context;
+    ++proof->calls;
+    return proof->store->locked && proof->stopped && binding->present &&
+           binding->package_present &&
+           binding->firmware_sha256[0] == 0xb0 &&
+           memcmp(binding->package_sha256, proof->package_sha256, 32) == 0;
+}
+
 static void make_fixture(fixture_t *fixture, uint8_t seed)
 {
     memset(fixture, 0, sizeof(*fixture));
@@ -1089,6 +1107,174 @@ static void test_retire_commit_readback_failures(void)
     assert(store.erase_count[0] == 0 && store.erase_count[1] == 0);
 }
 
+static void test_product_uninstall_preserves_fallback(void)
+{
+    fake_store_t store;
+    fixture_t p0, p1, p2;
+    seed_two_packages(&store, &p0, &p1);
+    make_fixture(&p2, 12);
+    const econtainer_slots_io_t io = fake_io(&store);
+    const econtainer_slot_firmware_set_t running = firmware_set(0xb0);
+    econtainer_slots_state_t state;
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    const uint32_t sequence = state.sequence;
+    const unsigned writes = store.blob_write_count;
+    uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES] = {23};
+    uninstall_proof_t proof = {.store = &store};
+    digest_fixture(&p1, proof.package_sha256);
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence - 1U, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_CONFLICT);
+    const econtainer_slot_firmware_set_t wrong_set = firmware_set(0xa0);
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence, &wrong_set,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_CONFLICT);
+    uint8_t wrong_digest[32] = {1};
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence, &running,
+        operation_id, wrong_digest, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_CONFLICT);
+    assert(proof.calls == 0 && store.blob_write_count == writes);
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_BUSY);
+    assert(proof.calls == 1 && store.blob_write_count == writes);
+
+    uint8_t original_flash[FLASH_BYTES];
+    memcpy(original_flash, store.flash, sizeof original_flash);
+    proof.stopped = true;
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_OK);
+    assert(proof.calls == 2 && store.blob_write_count == writes + 1U);
+    assert(state.sequence == sequence + 1U && state.phase == ECONTAINER_SLOT_CONFIRMED);
+    assert(state.operation.kind == ECONTAINER_SLOT_NO_PACKAGE &&
+           !state.operation.firmware_transition &&
+           memcmp(state.operation.operation_id, operation_id, sizeof operation_id) == 0 &&
+           memcmp(state.operation.target_firmware_sha256,
+                  running.running_firmware_sha256, 32) == 0);
+    assert(!state.bindings[1].package_present && state.bindings[1].present &&
+           state.bindings[0].package_present && state.bindings[0].slot == 0);
+    assert(econtainer_slots_uninstall(&io, &geometry, state.sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_CONFLICT);
+    assert(memcmp(store.flash, original_flash, sizeof original_flash) == 0 &&
+           store.erase_count[0] == 0 && store.erase_count[1] == 0);
+
+    /* Recreate the caller after reset. The fallback still owns P0 while the
+     * running firmware has no package. A new install may only reserve slot 1. */
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    econtainer_slot_boot_decision_t decision = ECONTAINER_SLOT_BOOT_BLOCKED;
+    assert(econtainer_slots_reconcile(&io, &geometry, &running,
+        &state, &decision) == ECONTAINER_SLOTS_OK &&
+        decision == ECONTAINER_SLOT_BOOT_CONFIRMED);
+    const econtainer_slot_firmware_set_t fallback = firmware_set(0xa0);
+    assert(econtainer_slots_reconcile(&io, &geometry, &fallback,
+        &state, &decision) == ECONTAINER_SLOTS_OK &&
+        decision == ECONTAINER_SLOT_BOOT_CONFIRMED);
+    econtainer_slot_operation_t next = operation(24, 0xb0, &p2);
+    assert(econtainer_slots_reserve(&io, &geometry, state.sequence, &running,
+        &next, &state) == ECONTAINER_SLOTS_OK && state.operation.slot == 1);
+    assert(memcmp(store.flash, original_flash, sizeof original_flash) == 0);
+}
+
+static void test_product_uninstall_shared_slot_and_failures(void)
+{
+    fake_store_t store;
+    fixture_t package, replacement;
+    make_fixture(&package, 10);
+    make_fixture(&replacement, 12);
+    memset(&store, 0, sizeof store);
+    memset(store.flash, 0xff, sizeof store.flash);
+    memcpy(store.flash, package.bytes, package.length);
+    const econtainer_slot_binding_t bindings[2] = {
+        binding(0xa0, 0, &package), binding(0xb0, 0, &package),
+    };
+    const econtainer_slots_io_t io = fake_io(&store);
+    const econtainer_slot_firmware_set_t running = firmware_set(0xb0);
+    assert(econtainer_slots_initialize(&io, &geometry, &running,
+                                       bindings) == ECONTAINER_SLOTS_OK);
+    econtainer_slots_state_t state;
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES] = {31};
+    uninstall_proof_t proof = {.store = &store, .stopped = true};
+    digest_fixture(&package, proof.package_sha256);
+    assert(econtainer_slots_uninstall(&io, &geometry, state.sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_OK);
+    assert(state.bindings[0].package_present && state.bindings[0].slot == 0 &&
+           !state.bindings[1].package_present && store.erase_count[0] == 0);
+    econtainer_slot_operation_t next = operation(32, 0xb0, &replacement);
+    assert(econtainer_slots_reserve(&io, &geometry, state.sequence, &running,
+        &next, &state) == ECONTAINER_SLOTS_OK && state.operation.slot == 1);
+
+    /* A failed or torn NVS commit never licenses erasing the old package. */
+    fixture_t p0, p1;
+    seed_two_packages(&store, &p0, &p1);
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    digest_fixture(&p1, proof.package_sha256);
+    const uint32_t sequence = state.sequence;
+    const unsigned writes = store.blob_write_count;
+    store.fail_blob_write_before = true;
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_IO_FAILED);
+    store.fail_blob_write_before = false;
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK &&
+           state.sequence == sequence && state.bindings[1].package_present);
+    assert(store.blob_write_count == writes + 1U);
+    store.fail_read_after_write = true;
+    assert(econtainer_slots_uninstall(&io, &geometry, sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_UNCERTAIN);
+    store.fail_read_after_write = false;
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK &&
+           state.sequence == sequence + 1U && !state.bindings[1].package_present &&
+           state.bindings[0].package_present);
+    assert(store.erase_count[0] == 0 && store.erase_count[1] == 0);
+
+    seed_two_packages(&store, &p0, &p1);
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    digest_fixture(&p1, proof.package_sha256);
+    store.flash[SLOT_BYTES] ^= 1U; /* Broken current package can be removed. */
+    assert(econtainer_slots_uninstall(&io, &geometry, state.sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_OK);
+    assert(!state.bindings[1].package_present && state.bindings[0].package_present);
+    seed_two_packages(&store, &p0, &p1);
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    digest_fixture(&p1, proof.package_sha256);
+    store.flash[0] ^= 1U; /* Broken fallback cannot be declared recoverable. */
+    const unsigned before = store.blob_write_count;
+    assert(econtainer_slots_uninstall(&io, &geometry, state.sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_UNTRUSTED);
+    assert(store.blob_write_count == before);
+}
+
+static void test_product_uninstall_rejects_pending_operation(void)
+{
+    fake_store_t store;
+    fixture_t p0, p1, p2;
+    seed_two_packages(&store, &p0, &p1);
+    make_fixture(&p2, 12);
+    const econtainer_slots_io_t io = fake_io(&store);
+    const econtainer_slot_firmware_set_t running = firmware_set(0xb0);
+    econtainer_slots_state_t state;
+    assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+    econtainer_slot_operation_t candidate = operation(40, 0xb0, &p2);
+    assert(econtainer_slots_reserve(&io, &geometry, state.sequence, &running,
+        &candidate, &state) == ECONTAINER_SLOTS_OK);
+    uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES] = {41};
+    uninstall_proof_t proof = {.store = &store, .stopped = true};
+    digest_fixture(&p1, proof.package_sha256);
+    const unsigned writes = store.blob_write_count;
+    assert(econtainer_slots_uninstall(&io, &geometry, state.sequence, &running,
+        operation_id, proof.package_sha256, instance_stopped_proof, &proof,
+        &state) == ECONTAINER_SLOTS_BUSY);
+    assert(proof.calls == 0 && store.blob_write_count == writes &&
+           store.erase_count[0] == 0 && store.erase_count[1] == 0);
+}
+
 int main(void)
 {
     test_four_packages();
@@ -1105,6 +1291,9 @@ int main(void)
     test_retire_inactive_firmware();
     test_retire_rejects_pending_and_bad_storage();
     test_retire_commit_readback_failures();
+    test_product_uninstall_preserves_fallback();
+    test_product_uninstall_shared_slot_and_failures();
+    test_product_uninstall_rejects_pending_operation();
     puts("slots: protected P0/P1/P2/P3, durable commit, torn Flash and restart checks passed");
     return 0;
 }

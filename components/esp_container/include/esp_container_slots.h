@@ -161,6 +161,12 @@ typedef econtainer_slot_validation_result_t (*econtainer_slot_validate_binding_f
 typedef bool (*econtainer_slot_trial_stopped_fn)(
     void *context, const uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES]);
 
+/* The unique executor owner proves that this exact confirmed instance has
+ * stopped and all native references have been reclaimed. Called under the
+ * package-slot lock; it must not enter another slot operation. */
+typedef bool (*econtainer_slot_instance_stopped_fn)(
+    void *context, const econtainer_slot_binding_t *binding);
+
 typedef enum {
     ECONTAINER_SLOT_BOOT_BLOCKED = 0,
     ECONTAINER_SLOT_BOOT_CONFIRMED,
@@ -253,6 +259,23 @@ econtainer_slots_result_t econtainer_slots_write_and_prepare(
     uint32_t expected_sequence, econtainer_slot_source_fn source_fn,
     void *source_context, econtainer_slot_validate_fn validate_fn,
     void *validate_context, econtainer_slots_state_t *state);
+
+/* Product-only uninstall. Base holds the app/package operation owner, has
+ * resolved any selected firmware OTA receipt and stopped the current confirmed
+ * instance. Match the exact firmware set,
+ * sequence and package digest, then clear only the running firmware's package
+ * binding in one committed and independently read-back blob. The operation ID
+ * remains in a terminal NO_PACKAGE record for result lookup. Neither package
+ * Flash nor product data is erased; another bootable firmware's binding stays
+ * protected. A failed or uncertain commit must be resolved from durable state
+ * before another operation, never assumed to have removed the package. */
+econtainer_slots_result_t econtainer_slots_uninstall(
+    const econtainer_slots_io_t *io, const econtainer_slots_geometry_t *geometry,
+    uint32_t expected_sequence, const econtainer_slot_firmware_set_t *firmware_set,
+    const uint8_t operation_id[ECONTAINER_SLOT_OPERATION_ID_BYTES],
+    const uint8_t expected_package_sha256[32],
+    econtainer_slot_instance_stopped_fn instance_stopped_fn, void *instance_context,
+    econtainer_slots_state_t *state);
 
 /* Product-only trial: caller has already stopped/reclaimed the previous instance. */
 econtainer_slots_result_t econtainer_slots_begin_trial(
