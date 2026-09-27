@@ -311,7 +311,7 @@ static void confirm(fixture_t *fixture)
         &fixture->state) == ECONTAINER_SLOTS_OK);
 }
 
-static void run_counter(fixture_t *fixture, bool trial)
+static void run_counter(fixture_t *fixture, bool trial, int32_t expected_result)
 {
     const econtainer_slot_selection_request_t request = request_for(fixture, trial);
     econtainer_runtime_t *runtime = NULL;
@@ -325,7 +325,7 @@ static void run_counter(fixture_t *fixture, bool trial)
     const uint8_t event[] = {1, 2, 3};
     int32_t value = -1;
     assert(econtainer_product_on_event(runtime, event, sizeof(event), &value) == ECONTAINER_RUNTIME_OK);
-    assert(value == 3);
+    assert(value == expected_result);
     assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
     assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
 }
@@ -429,9 +429,13 @@ int main(int argc, char **argv)
                invalid_result.runtime == ECONTAINER_RUNTIME_INVALID_INPUT && invalid == NULL);
         assert(fixture->store.mapped == fixture->store.unmapped && !fixture->store.locked);
         fixture->limits.stack_size_bytes = 16384;
-        run_counter(fixture, true);
+        /* P1 -> P2 changes only the signed guest source, on firmware B in
+         * the same boot. A version string change alone cannot prove this. */
+        assert(index < 1 || memcmp(fixture->firmware.running_firmware_sha256,
+            fixture->firmware.bootable_firmware_sha256[1], 32) == 0);
+        run_counter(fixture, true, index < 2 ? 3 : 6);
         confirm(fixture);
-        run_counter(fixture, false);
+        run_counter(fixture, false, index < 2 ? 3 : 6);
         assert(fixture->state.bindings[0].slot == 0);
         assert(memcmp(fixture->store.flash, packages[0].bytes, packages[0].size) == 0);
         if (index > 0) assert(fixture->state.bindings[1].slot == (index % 2 != 0 ? 1 : 2));
@@ -440,7 +444,7 @@ int main(int argc, char **argv)
     prepare(fixture, &packages[2]);
     const size_t candidate_offset = geometry.slots[fixture->state.operation.slot].offset_bytes - FLASH_BASE;
     fixture->store.flash[candidate_offset] ^= 1;
-    run_counter(fixture, false);
+    run_counter(fixture, false, 6);
     fixture->store.flash[candidate_offset] ^= 1;
     /* But corruption/read failure in the other bootable firmware's reference blocks startup. */
     request = request_for(fixture, false);
@@ -455,7 +459,7 @@ int main(int argc, char **argv)
     const unsigned erases = fixture->store.erases, writes = fixture->store.writes;
     pthread_t writer;
     assert(pthread_create(&writer, NULL, competing_writer, fixture) == 0);
-    run_counter(fixture, true);
+    run_counter(fixture, true, 6);
     assert(pthread_join(writer, NULL) == 0);
     fixture->store.race = false;
     assert(fixture->store.erases == erases && fixture->store.writes == writes);
@@ -510,7 +514,7 @@ int main(int argc, char **argv)
             assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
         }
         abandon(fixture);
-        run_counter(fixture, false);
+        run_counter(fixture, false, 6);
     }
     /* Public owner-driven timer delivery uses the same signed slot path. */
     fixture->limits.max_timers = 2;

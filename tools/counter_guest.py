@@ -215,7 +215,7 @@ def check_wasm(data: bytes) -> None:
     _code(sections[10], len(functions))
 
 
-def build(sdk: Path, output: Path) -> None:
+def build(sdk: Path, output: Path, source: Path | None = None) -> None:
     if (sdk / "VERSION").read_text(encoding="utf-8").strip() != SDK_VERSION:
         raise GuestError("WASI SDK 版本/源码锁不匹配：需要官方 wasi-sdk-33")
     clang = sdk / "bin" / "clang"
@@ -231,7 +231,7 @@ def build(sdk: Path, output: Path) -> None:
             "-fno-builtin", "-fno-exceptions", "-fno-stack-protector",
             *(f"-mno-{feature}" for feature in FEATURES_OFF),
             "-I", str(ROOT / "guest-sdk" / "include"),
-            str(ROOT / "examples" / "counter" / "counter.c"),
+            str(source if source is not None else ROOT / "examples" / "counter" / "counter.c"),
             str(ROOT / "guest-sdk" / "src" / "econtainer_guest.c"),
             "-Wl,--no-entry",
             "-Wl,--export=econtainer_event_buffer",
@@ -258,12 +258,14 @@ def main() -> int:
     builder = commands.add_parser("build", help="用固定 WASI SDK 构建并检查 counter guest")
     builder.add_argument("--wasi-sdk", required=True, type=Path)
     builder.add_argument("--output", required=True, type=Path)
+    builder.add_argument("--source", type=Path,
+                         help="guest C 源码；默认使用 examples/counter/counter.c")
     checker = commands.add_parser("check", help="独立检查已有 counter Wasm 的 ABI/profile")
     checker.add_argument("--wasm", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "build":
-            build(args.wasi_sdk, args.output)
+            build(args.wasi_sdk, args.output, args.source)
         else:
             data = args.wasm.read_bytes()
             check_wasm(data)

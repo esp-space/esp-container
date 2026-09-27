@@ -49,6 +49,8 @@ def main() -> int:
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     counter_guest.build(args.wasi_sdk, args.output_dir / "counter.wasm")
+    counter_guest.build(args.wasi_sdk, args.output_dir / "counter-v2.wasm",
+                        ROOT / "examples" / "counter-v2" / "counter.c")
     (args.output_dir / "two-page.wasm").write_bytes(
         two_page_fixture((args.output_dir / "counter.wasm").read_bytes()))
     clang = args.wasi_sdk / "bin" / "clang"

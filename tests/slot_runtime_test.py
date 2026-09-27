@@ -20,6 +20,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     spec = json.loads((root / "examples/counter/spec.example.json").read_text())
     counter = (guests / "counter.wasm").read_bytes()
+    counter_v2 = (guests / "counter-v2.wasm").read_bytes()
     with tempfile.TemporaryDirectory() as directory:
         temporary = Path(directory)
         key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
@@ -31,7 +32,8 @@ def main() -> None:
         for index in range(4):
             current = copy.deepcopy(spec)
             current["product_version"] = f"v0-1-{index}"
-            (temporary / f"p{index}.pkg").write_bytes(signed_package(private, counter, current))
+            wasm = counter if index < 2 else counter_v2
+            (temporary / f"p{index}.pkg").write_bytes(signed_package(private, wasm, current))
         for name, field, limit in (("budget", "instruction_budget", 1),
                                    ("stack", "stack_limit_bytes", 8)):
             current = copy.deepcopy(spec)

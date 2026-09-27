@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-    source["counter.c / guest SDK"] --> builder["counter_guest.py：编译 / ABI 检查"]
+    source["counter v1/v2 源码 / guest SDK"] --> builder["counter_guest.py：编译 / ABI 检查"]
     wasi["wasi-sdk 33"] --> builder
     builder --> wasm
     spec["产品清单输入"] --> manifest["manifest：规范 JSON 与 Wasm 摘要"]
@@ -25,7 +25,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-以下仅示例本地测试材料；不要把真实签名私钥提交到仓库。[counter 样例](../examples/counter/README.md)提供锁定 wasi-sdk 33 的 `tools/counter_guest.py build/check` 入口。本打包工具在 `manifest`、`pack` 和 `verify` 时检查设备流式扫描器可从签名清单和 Wasm 字节确定的 `wamr-classic-v1`、guest ABI v2、能力声明、导入、五项导出与页内不可变事件区地址、函数类型、内存上限、代码数量与 section profile；counter 自身更窄的固定编译配方仍由样例检查器负责。平台独立授权和 WAMR 指令加载仍须由设备执行。
+以下仅示例本地测试材料；不要把真实签名私钥提交到仓库。[counter 样例](../examples/counter/README.md)提供锁定 wasi-sdk 33 的 `tools/counter_guest.py build/check` 入口，`build --source` 可用同一固定配方编译[第二版业务源码](../examples/counter-v2/README.md)。本打包工具在 `manifest`、`pack` 和 `verify` 时检查设备流式扫描器可从签名清单和 Wasm 字节确定的 `wamr-classic-v1`、guest ABI v2、能力声明、导入、五项导出与页内不可变事件区地址、函数类型、内存上限、代码数量与 section profile；counter 自身更窄的固定编译配方仍由样例检查器负责。平台独立授权和 WAMR 指令加载仍须由设备执行。
 
 ```bash
 .venv/bin/python tools/product_package.py manifest --spec examples/counter/spec.example.json --wasm dist/app.wasm --output dist/manifest.json

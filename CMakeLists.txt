@@ -103,15 +103,18 @@ if(BUILD_TESTING)
             list(APPEND runtime_guests "${runtime_guests_dir}/two-page.wasm")
             list(APPEND runtime_guests "${runtime_guests_dir}/memory.wasm")
             add_custom_command(OUTPUT ${runtime_guests}
+                    "${runtime_guests_dir}/counter-v2.wasm"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/build_runtime_guests.py"
                     --wasi-sdk "${ESP_CONTAINER_WASI_SDK_ROOT}"
                     --output-dir "${runtime_guests_dir}"
                 DEPENDS tests/build_runtime_guests.py tests/runtime_guest.c tests/host_api_guest.c
                     tests/timer_guest.c tests/deadline_guest.c tests/memory_guest.c
                     tools/counter_guest.py examples/counter/counter.c
+                    examples/counter-v2/counter.c
                     guest-sdk/include/econtainer_guest.h guest-sdk/src/econtainer_guest.c
                 VERBATIM)
-            add_custom_target(runtime_guest_fixtures DEPENDS ${runtime_guests})
+            add_custom_target(runtime_guest_fixtures DEPENDS ${runtime_guests}
+                "${runtime_guests_dir}/counter-v2.wasm")
             add_executable(runtime_instance_test tests/runtime_instance_test.c)
             target_include_directories(runtime_instance_test PRIVATE components/esp_container/src)
             target_link_libraries(runtime_instance_test PRIVATE esp_container)

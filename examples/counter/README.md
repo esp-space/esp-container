@@ -2,6 +2,8 @@
 
 `counter.c` 只定义 `econtainer_init`、`econtainer_on_event` 和 `econtainer_stop` 三个显式导出入口，不使用宿主 import、WASI、线程、构造函数或设备输出。公开头位于 `guest-sdk/include/econtainer_guest.h`；ABI 2 同时链接 `guest-sdk/src/econtainer_guest.c`，导出页内 4 KiB 事件区的不可变地址 global。`tools/counter_guest.py` 固定此样例的 freestanding 编译参数与静态 ABI/profile 检查；完整宿主 API、可安装产品包和真实 C3 业务生命周期仍未验收。
 
+[counter v2](../counter-v2/README.md) 沿用本样例的产品身份与 ABI，仅改变事件处理源码；主机签名包槽回归在同一固件和 boot 中验证了行为变化。
+
 ## 架构拓扑
 
 ```mermaid
