@@ -70,6 +70,11 @@ typedef struct {
 typedef struct {
     econtainer_slots_result_t slots;
     econtainer_runtime_result_t runtime;
+    /* Populated only with a live runtime after the selected Flash package was
+     * reverified. The caller uses the signed event limit and package identity
+     * to bind its external event queue; failure leaves both fields zero. */
+    uint32_t event_queue_limit;
+    uint8_t package_sha256[32];
 } econtainer_slot_runtime_result_t;
 
 /* Base owns the outer app/otadata and package-operation serialization. The
@@ -84,7 +89,9 @@ typedef struct {
  * mapping before returning. validation workspaces are caller-owned for this
  * synchronous call; verified_info is ignored. Signed limits are intersected
  * with the independent runtime_limits. out must point to NULL.
- * On ESP-IDF the unique executor owner must be a pthread_create thread. */
+ * On ESP-IDF the unique executor owner must be a pthread_create thread. A
+ * successful result also returns the reverified signed queue limit and package
+ * digest, so the caller need not trust an earlier admission snapshot. */
 econtainer_slot_runtime_result_t econtainer_product_open(
     const econtainer_slots_io_t *io, const econtainer_slots_geometry_t *geometry,
     const econtainer_slot_selection_request_t *request,

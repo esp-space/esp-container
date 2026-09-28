@@ -273,6 +273,9 @@ static void expect_rejection(fixture_t *fixture,
     econtainer_runtime_t *runtime = NULL;
     const econtainer_slot_runtime_result_t result = open_request(fixture, request, &runtime);
     assert(result.slots == expected && result.runtime == ECONTAINER_RUNTIME_INVALID_STATE);
+    assert(result.event_queue_limit == 0U);
+    const uint8_t empty_digest[32] = {0};
+    assert(memcmp(result.package_sha256, empty_digest, sizeof empty_digest) == 0);
     assert(runtime == NULL && !fixture->store.locked && fixture->store.mapping == NULL);
     assert(fixture->store.mapped == fixture->store.unmapped);
 }
@@ -320,6 +323,19 @@ static void run_counter(fixture_t *fixture, bool trial, int32_t expected_result)
     const econtainer_slot_runtime_result_t result = open_request(fixture, &request, &runtime);
     fixture->validation.verified_info = &fixture->info;
     assert(result.slots == ECONTAINER_SLOTS_OK && result.runtime == ECONTAINER_RUNTIME_OK);
+    const uint8_t *selected_digest = trial ? fixture->state.operation.package_sha256 : NULL;
+    if (!trial) {
+        for (unsigned index = 0; index < ECONTAINER_SLOT_BINDING_COUNT; ++index) {
+            const econtainer_slot_binding_t *binding = &fixture->state.bindings[index];
+            if (binding->present && memcmp(binding->firmware_sha256,
+                    fixture->firmware.running_firmware_sha256, 32) == 0) {
+                selected_digest = binding->package_sha256;
+                break;
+            }
+        }
+    }
+    assert(selected_digest != NULL && result.event_queue_limit == 8U &&
+           memcmp(result.package_sha256, selected_digest, 32) == 0);
     assert(runtime != NULL && fixture->store.mapping == NULL && !fixture->store.locked);
     assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
     const uint8_t event[] = {1, 2, 3};
@@ -484,6 +500,9 @@ int main(int argc, char **argv)
             fixture->limits.allowed_capabilities = 0;
             result = open_request(fixture, &request, &runtime);
             assert(result.slots == ECONTAINER_SLOTS_OK && result.runtime == ECONTAINER_RUNTIME_NOT_AUTHORIZED);
+            const uint8_t empty_digest[32] = {0};
+            assert(result.event_queue_limit == 0U &&
+                   memcmp(result.package_sha256, empty_digest, 32) == 0);
             assert(runtime == NULL);
             fixture->limits.allowed_capabilities = ECONTAINER_CAP_ALL;
         }

@@ -4,6 +4,8 @@
 
 `econtainer_slots_uninstall` 可在 Base 停止并回收当前确认实例后，以精确包摘要和固件集合清除当前固件的包绑定。它持久读回 `NO_PACKAGE` 终态，保留回退固件绑定和包 Flash 字节；Base 的卸载命令与运行重启仍待接入。详见[三包槽存储检查点](docs/operations/three-slot-storage-checkpoint.md)。
 
+`econtainer_product_open` 只有在实际选中包从 Flash 重新验签、授权并成功创建 runtime 后，才向 Base 返回签名清单中的事件队列额度及包 SHA-256；拒绝和运行时创建失败时这两项均为零。Base 据此限制外部业务事件入队，并将事件绑定到当前包身份。
+
 ESP-IDF provider 要求调用方分别提供槽操作锁与物理 I/O 租约回调。包分区读、擦、写及专用 NVS blob 的一次访问各自获取和释放租约；映射在 map 至 unmap 期间持有租约，失败也释放。映射窗口还包含验包与解释器装载，其时长上界仍须测量。Base 的装配把租约接到 FRP scratch 使用的 owner；完整 app/其他 NVS 仲裁及实板并发仍待验证。
 
 ## 架构拓扑
@@ -27,7 +29,7 @@ flowchart LR
     slots --> slot_callbacks["调用方 Flash / NVS 回调接口"]
     idf_provider["slots_idf：精确专用分区 / NVS 接线"] --> slot_callbacks
     idf_provider --> idf_storage["ESP-IDF esp_partition / NVS"]
-    base --> product_api["公开产品 API：精确选择 / init / event / stop / close"]
+    base --> product_api["公开产品 API：精确选择 / 签名队列额度与包摘要 / init / event / stop / close"]
     product_api --> bridge["组件私有槽装载：真实绑定 / 锁内重新验包授权 / 短时映射"]
     slots --> bridge
     idf_provider --> bridge

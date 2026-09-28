@@ -15,6 +15,8 @@ typedef struct {
     const econtainer_runtime_limits_t *platform_limits;
     econtainer_runtime_t **out;
     econtainer_runtime_result_t runtime_result;
+    uint32_t event_queue_limit;
+    uint8_t package_sha256[32];
 } slot_runtime_open_t;
 
 static bool read_mapped(void *context, size_t offset_bytes,
@@ -73,6 +75,11 @@ static econtainer_slots_result_t open_selected(void *context,
             if (limits.stop_instruction_budget > budget) limits.stop_instruction_budget = budget;
             open->runtime_result = econtainer_runtime_open(mapped + info.wasm_offset_bytes,
                 info.wasm_size_bytes, &limits, open->out);
+            if (open->runtime_result == ECONTAINER_RUNTIME_OK && *open->out != NULL) {
+                open->event_queue_limit = info.event_queue_limit;
+                memcpy(open->package_sha256, info.package_sha256,
+                       sizeof open->package_sha256);
+            }
             result = ECONTAINER_SLOTS_OK;
         }
     }
@@ -88,15 +95,24 @@ econtainer_slot_runtime_result_t econtainer_slot_runtime_open(
     econtainer_runtime_t **out)
 {
     econtainer_slot_runtime_result_t result = {
-        ECONTAINER_SLOTS_INVALID, ECONTAINER_RUNTIME_INVALID_STATE};
+        .slots = ECONTAINER_SLOTS_INVALID,
+        .runtime = ECONTAINER_RUNTIME_INVALID_STATE,
+    };
     if (io == NULL || io->flash_map == NULL || io->flash_unmap == NULL ||
         validation == NULL || platform_limits == NULL || out == NULL || *out != NULL) {
         return result;
     }
-    slot_runtime_open_t open = {io, validation, platform_limits, out,
-                               ECONTAINER_RUNTIME_INVALID_STATE};
+    slot_runtime_open_t open = {.io = io, .validation = validation,
+        .platform_limits = platform_limits, .out = out,
+        .runtime_result = ECONTAINER_RUNTIME_INVALID_STATE};
     result.slots = econtainer_slots_with_selected_package(io, geometry, request,
                                                            open_selected, &open);
     result.runtime = open.runtime_result;
+    if (result.slots == ECONTAINER_SLOTS_OK &&
+        result.runtime == ECONTAINER_RUNTIME_OK) {
+        result.event_queue_limit = open.event_queue_limit;
+        memcpy(result.package_sha256, open.package_sha256,
+               sizeof result.package_sha256);
+    }
     return result;
 }

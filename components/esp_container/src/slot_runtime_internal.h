@@ -14,12 +14,14 @@
  * for this call, and never executes a guest entrypoint. runtime_open owns its
  * required code/data copies before unmap/unlock. init is a separate owner call.
  * The validation's verified_info pointer is ignored: no old admission proof is
- * consumed or exported. Workspaces remain caller-owned for the call.
+ * consumed. Workspaces remain caller-owned for the call.
  *
  * Signed memory/stack/budgets and requested capabilities bound the separately
  * granted runtime limits. Heap/event bytes/log/timer counts and whole-entry
  * duration remain independent platform policy. Queue/storage/individual host
- * timeout are still admission-only; this bridge does not add those facilities. */
+ * timeout are still admission-only; this bridge does not add those facilities.
+ * Successful open exports the freshly verified queue limit and package digest
+ * to let the caller own a matching event queue. */
 econtainer_slot_runtime_result_t econtainer_slot_runtime_open(
     const econtainer_slots_io_t *io, const econtainer_slots_geometry_t *geometry,
     const econtainer_slot_selection_request_t *request,
