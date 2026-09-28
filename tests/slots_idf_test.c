@@ -12,6 +12,24 @@ enum { PACKAGE_BASE = 0x500000, PACKAGE_BYTES = 0x3000,
 
 struct test_semaphore { bool held; };
 static struct test_semaphore storage_lock;
+static bool flash_io_held, deny_flash_io;
+static unsigned flash_io_acquires, flash_io_releases;
+
+static bool acquire_flash_io(void *context)
+{
+    assert(context == &storage_lock && storage_lock.held && !flash_io_held);
+    if (deny_flash_io) return false;
+    flash_io_held = true;
+    ++flash_io_acquires;
+    return true;
+}
+
+static void release_flash_io(void *context)
+{
+    assert(context == &storage_lock && storage_lock.held && flash_io_held);
+    flash_io_held = false;
+    ++flash_io_releases;
+}
 static esp_partition_t package_partition = {
     .type = ESP_PARTITION_TYPE_DATA,
     .subtype = ESP_PARTITION_SUBTYPE_DATA_UNDEFINED,
@@ -58,6 +76,9 @@ static econtainer_slots_idf_config_t config(void)
         .nvs_namespace = "product_slots",
         .nvs_key = "state",
         .storage_lock = &storage_lock,
+        .acquire_flash_io = acquire_flash_io,
+        .release_flash_io = release_flash_io,
+        .flash_io_context = &storage_lock,
     };
     return result;
 }
@@ -71,6 +92,8 @@ static void reset(void)
     nvs_partition.readonly = false;
     package_available = true;
     storage_lock.held = false;
+    flash_io_held = deny_flash_io = false;
+    flash_io_acquires = flash_io_releases = 0;
     namespace_exists = staged = false;
     fail_open = fail_get = fail_set = fail_commit = commit_then_fail = false;
     stored_size = 0;
@@ -96,7 +119,7 @@ int xSemaphoreTake(SemaphoreHandle_t semaphore, unsigned ticks)
 int xSemaphoreGive(SemaphoreHandle_t semaphore)
 {
     assert(semaphore == &storage_lock && semaphore->held);
-    assert(!mapping_live);
+    assert(!mapping_live && !flash_io_held);
     semaphore->held = false;
     return pdTRUE;
 }
@@ -116,7 +139,7 @@ const esp_partition_t *esp_partition_find_first(esp_partition_type_t type,
 esp_err_t esp_partition_read(const esp_partition_t *partition, size_t offset,
                              void *destination, size_t size)
 {
-    assert(partition == &package_partition && offset + size <= sizeof flash);
+    assert(flash_io_held && partition == &package_partition && offset + size <= sizeof flash);
     ++reads;
     memcpy(destination, flash + offset, size);
     return ESP_OK;
@@ -126,7 +149,7 @@ esp_err_t esp_partition_erase_range(const esp_partition_t *partition, size_t off
                                     size_t size)
 {
     assert(!mapping_live);
-    assert(partition == &package_partition && offset + size <= sizeof flash);
+    assert(flash_io_held && partition == &package_partition && offset + size <= sizeof flash);
     assert(offset % SECTOR_BYTES == 0U && size % SECTOR_BYTES == 0U);
     ++erases;
     memset(flash + offset, 0xff, size);
@@ -137,7 +160,7 @@ esp_err_t esp_partition_write(const esp_partition_t *partition, size_t offset,
                               const void *source, size_t size)
 {
     assert(!mapping_live);
-    assert(partition == &package_partition && offset + size <= sizeof flash);
+    assert(flash_io_held && partition == &package_partition && offset + size <= sizeof flash);
     ++writes;
     const uint8_t *bytes = source;
     for (size_t index = 0; index < size; ++index) {
@@ -152,7 +175,7 @@ esp_err_t esp_partition_mmap(const esp_partition_t *partition, size_t offset,
                              const void **out_ptr,
                              esp_partition_mmap_handle_t *out_handle)
 {
-    assert(storage_lock.held && !mapping_live);
+    assert(storage_lock.held && flash_io_held && !mapping_live);
     assert(partition == &package_partition && size > 0U && size <= sizeof flash);
     assert(offset <= sizeof flash - size && out_ptr != NULL && out_handle != NULL);
     assert(flags == (ESP_PARTITION_MMAP_DATA | ESP_PARTITION_MMAP_BLOCKS_WRITE));
@@ -167,7 +190,7 @@ esp_err_t esp_partition_mmap(const esp_partition_t *partition, size_t offset,
 
 void esp_partition_munmap(esp_partition_mmap_handle_t handle)
 {
-    assert(storage_lock.held && mapping_live && handle == live_map_handle);
+    assert(storage_lock.held && flash_io_held && mapping_live && handle == live_map_handle);
     mapping_live = false; ++unmaps;
 }
 
@@ -175,7 +198,7 @@ esp_err_t nvs_open_from_partition(const char *partition_name,
                                   const char *namespace_name,
                                   nvs_open_mode_t mode, nvs_handle_t *handle)
 {
-    assert(strcmp(partition_name, "product_nvs") == 0);
+    assert(flash_io_held && strcmp(partition_name, "product_nvs") == 0);
     assert(strcmp(namespace_name, "product_slots") == 0);
     assert(open_handle == 0 && handle != NULL);
     if (fail_open) return ESP_FAIL;
@@ -271,6 +294,12 @@ static void test_binding_guards(void)
     selected = config();
     selected.storage_lock = NULL;
     assert(!econtainer_slots_idf_bind(&provider, &selected));
+    selected = config();
+    selected.acquire_flash_io = NULL;
+    assert(!econtainer_slots_idf_bind(&provider, &selected));
+    selected = config();
+    selected.release_flash_io = NULL;
+    assert(!econtainer_slots_idf_bind(&provider, &selected));
     assert(erases == 0 && writes == 0 && commits == 0);
 }
 
@@ -283,6 +312,12 @@ static void test_provider_io(void)
     assert(provider.io.lock(provider.io.context));
     assert(!provider.io.lock(provider.io.context));
     uint8_t blob[ECONTAINER_SLOT_BLOB_BYTES] = {0};
+    deny_flash_io = true;
+    assert(provider.io.read_blob(provider.io.context, blob) == ECONTAINER_SLOT_BLOB_READ_FAILED);
+    assert(!provider.io.flash_erase(provider.io.context, PACKAGE_BASE, SECTOR_BYTES));
+    assert(!provider.io.write_blob(provider.io.context, blob));
+    assert(flash_io_acquires == 0 && flash_io_releases == 0);
+    deny_flash_io = false;
     assert(provider.io.read_blob(provider.io.context, blob) == ECONTAINER_SLOT_BLOB_NOT_FOUND);
     assert(provider.io.flash_erase(provider.io.context, PACKAGE_BASE, SECTOR_BYTES));
     assert(!provider.io.flash_erase(provider.io.context, PACKAGE_BASE + 1U, SECTOR_BYTES));
@@ -313,7 +348,9 @@ static void test_provider_io(void)
     assert(!provider.io.write_blob(provider.io.context, blob));
     assert(commits == 2 && stored_size == ECONTAINER_SLOT_BLOB_BYTES);
     provider.io.unlock(provider.io.context);
-    assert(!storage_lock.held && writes == 1 && erases == 1 && reads == 1);
+    assert(!storage_lock.held && !flash_io_held &&
+           flash_io_acquires == flash_io_releases &&
+           writes == 1 && erases == 1 && reads == 1);
 }
 
 static void test_provider_mapping(void)
@@ -326,13 +363,19 @@ static void test_provider_mapping(void)
     for (size_t i = 0; i < sizeof flash; ++i) flash[i] = (uint8_t)(i * 29U);
     const uint8_t *mapped = NULL; uintptr_t handle = UINTPTR_MAX;
     const size_t relative_offset = SECTOR_BYTES + 3U, size = SECTOR_BYTES + 5U;
+    deny_flash_io = true;
+    assert(!provider.io.flash_map(provider.io.context,
+        PACKAGE_BASE + (uint32_t)relative_offset, size, &mapped, &handle));
+    assert(mapped == NULL && handle == 0U && !flash_io_held && maps == 0);
+    deny_flash_io = false;
     assert(provider.io.flash_map(provider.io.context,
         PACKAGE_BASE + (uint32_t)relative_offset, size, &mapped, &handle));
     assert(mapping_live && handle == 0U && mapped == flash + relative_offset);
+    assert(flash_io_held);
     assert(mapped_offset == relative_offset && mapped_size == size);
     assert(memcmp(mapped, flash + relative_offset, size) == 0);
     provider.io.flash_unmap(provider.io.context, handle);
-    assert(!mapping_live && maps == 1 && unmaps == 1);
+    assert(!mapping_live && !flash_io_held && maps == 1 && unmaps == 1);
 
     next_map_handle = UINT32_MAX;
     assert(provider.io.flash_map(provider.io.context,
@@ -372,7 +415,9 @@ static void test_provider_mapping(void)
     assert(!provider.io.flash_map(provider.io.context, PACKAGE_BASE, 1U, &mapped, &handle));
     assert(mapped == NULL && handle == 0U && !mapping_live && maps == 4 && unmaps == 3);
     provider.io.unlock(provider.io.context);
-    assert(!storage_lock.held && erases == 0 && writes == 0 && commits == 0);
+    assert(!storage_lock.held && !flash_io_held &&
+           flash_io_acquires == flash_io_releases &&
+           erases == 0 && writes == 0 && commits == 0);
 }
 
 static void test_slot_engine_with_idf_provider(void)

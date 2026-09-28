@@ -4,6 +4,8 @@
 
 `econtainer_slots_uninstall` 可在 Base 停止并回收当前确认实例后，以精确包摘要和固件集合清除当前固件的包绑定。它持久读回 `NO_PACKAGE` 终态，保留回退固件绑定和包 Flash 字节；Base 的卸载命令与运行重启仍待接入。详见[三包槽存储检查点](docs/operations/three-slot-storage-checkpoint.md)。
 
+ESP-IDF provider 要求调用方分别提供槽操作锁与物理 I/O 租约回调。包分区读、擦、写及专用 NVS blob 的一次访问各自获取和释放租约；映射在 map 至 unmap 期间持有租约，失败也释放。映射窗口还包含验包与解释器装载，其时长上界仍须测量。Base 的装配把租约接到 FRP scratch 使用的 owner；完整 app/其他 NVS 仲裁及实板并发仍待验证。
+
 ## 架构拓扑
 
 ```mermaid

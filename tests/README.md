@@ -1,6 +1,6 @@
 # 测试入口
 
-`slots` CTest 的 product-only 卸载用精确包摘要和停止证明清除当前绑定，覆盖共享包槽、回退固件引用保留、后续预留避开回退槽、损坏回退包拒绝、NVS 写前失败与写后读回不确定。`slots_idf` CTest 在真实 `slots_idf.c` 回调下重建 provider，读回无包当前绑定和有包回退绑定，并覆盖 commit 失败和 commit 已生效但返回失败。该测试使用合成 SDK，不代表物理掉电或 Base 命令接线。
+`slots` CTest 的 product-only 卸载用精确包摘要和停止证明清除当前绑定，覆盖共享包槽、回退固件引用保留、后续预留避开回退槽、损坏回退包拒绝、NVS 写前失败与写后读回不确定。`slots_idf` CTest 在真实 `slots_idf.c` 回调下重建 provider，读回无包当前绑定和有包回退绑定，并覆盖 commit 失败和 commit 已生效但返回失败；另核对包 Flash／专用 NVS 操作持有短时 I/O 租约、获取失败不触碰存储、映射至解映射期间保留租约且各失败路径释放。该测试使用合成 SDK，不代表物理掉电或 Base 命令接线。
 
 ## 架构拓扑
 
