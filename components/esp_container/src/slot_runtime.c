@@ -83,7 +83,15 @@ static econtainer_slots_result_t open_selected(void *context,
             result = ECONTAINER_SLOTS_OK;
         }
     }
-    io->flash_unmap(io->context, handle);
+    if (!io->flash_unmap(io->context, handle)) {
+        if (*open->out != NULL) {
+            open->runtime_result = econtainer_runtime_close(open->out);
+            if (open->runtime_result == ECONTAINER_RUNTIME_OK) {
+                open->runtime_result = ECONTAINER_RUNTIME_INVALID_STATE;
+            }
+        }
+        return ECONTAINER_SLOTS_IO_FAILED;
+    }
     return result;
 }
 

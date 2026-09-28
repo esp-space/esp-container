@@ -71,8 +71,8 @@ static econtainer_slot_blob_result_t provider_read_blob(
     if (!provider->acquire_flash_io(provider->flash_io_context))
         return ECONTAINER_SLOT_BLOB_READ_FAILED;
     const econtainer_slot_blob_result_t result = read_blob_locked(context, blob);
-    provider->release_flash_io(provider->flash_io_context);
-    return result;
+    return provider->release_flash_io(provider->flash_io_context) ? result :
+           ECONTAINER_SLOT_BLOB_READ_FAILED;
 }
 
 static bool write_blob_locked(void *context,
@@ -96,8 +96,7 @@ static bool provider_write_blob(void *context,
     econtainer_slots_idf_provider_t *provider = context;
     if (!provider->acquire_flash_io(provider->flash_io_context)) return false;
     const bool result = write_blob_locked(context, blob);
-    provider->release_flash_io(provider->flash_io_context);
-    return result;
+    return provider->release_flash_io(provider->flash_io_context) && result;
 }
 
 static bool provider_flash_read(void *context, uint32_t offset_bytes,
@@ -108,8 +107,7 @@ static bool provider_flash_read(void *context, uint32_t offset_bytes,
         !provider->acquire_flash_io(provider->flash_io_context)) return false;
     const bool result = esp_partition_read(provider->package_partition,
         offset_bytes - provider->package_partition->address, destination, size_bytes) == ESP_OK;
-    provider->release_flash_io(provider->flash_io_context);
-    return result;
+    return provider->release_flash_io(provider->flash_io_context) && result;
 }
 
 static bool provider_flash_map(void *context, uint32_t offset_bytes,
@@ -134,12 +132,12 @@ static bool provider_flash_map(void *context, uint32_t offset_bytes,
                             size_bytes,
                             ESP_PARTITION_MMAP_DATA | ESP_PARTITION_MMAP_BLOCKS_WRITE,
                             &bytes, &sdk_handle) != ESP_OK) {
-        provider->release_flash_io(provider->flash_io_context);
+        (void)provider->release_flash_io(provider->flash_io_context);
         return false;
     }
     if (bytes == NULL) {
         esp_partition_munmap(sdk_handle);
-        provider->release_flash_io(provider->flash_io_context);
+        (void)provider->release_flash_io(provider->flash_io_context);
         return false;
     }
     *mapped = bytes;
@@ -147,11 +145,11 @@ static bool provider_flash_map(void *context, uint32_t offset_bytes,
     return true;
 }
 
-static void provider_flash_unmap(void *context, uintptr_t handle)
+static bool provider_flash_unmap(void *context, uintptr_t handle)
 {
     econtainer_slots_idf_provider_t *provider = context;
     esp_partition_munmap((esp_partition_mmap_handle_t)handle);
-    provider->release_flash_io(provider->flash_io_context);
+    return provider->release_flash_io(provider->flash_io_context);
 }
 
 static bool provider_flash_erase(void *context, uint32_t offset_bytes,
@@ -164,8 +162,7 @@ static bool provider_flash_erase(void *context, uint32_t offset_bytes,
         !provider->acquire_flash_io(provider->flash_io_context)) return false;
     const bool result = esp_partition_erase_range(provider->package_partition,
         offset_bytes - provider->package_partition->address, size_bytes) == ESP_OK;
-    provider->release_flash_io(provider->flash_io_context);
-    return result;
+    return provider->release_flash_io(provider->flash_io_context) && result;
 }
 
 static bool provider_flash_write(void *context, uint32_t offset_bytes,
@@ -178,8 +175,7 @@ static bool provider_flash_write(void *context, uint32_t offset_bytes,
         !provider->acquire_flash_io(provider->flash_io_context)) return false;
     const bool result = esp_partition_write(provider->package_partition,
         offset_bytes - provider->package_partition->address, source, size_bytes) == ESP_OK;
-    provider->release_flash_io(provider->flash_io_context);
-    return result;
+    return provider->release_flash_io(provider->flash_io_context) && result;
 }
 
 bool econtainer_slots_idf_bind(econtainer_slots_idf_provider_t *provider,

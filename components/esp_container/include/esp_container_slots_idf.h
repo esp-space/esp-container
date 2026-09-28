@@ -25,9 +25,10 @@ typedef struct {
     const char *nvs_key;
     SemaphoreHandle_t storage_lock;
     /* Physical I/O lease supplied by the product assembly. The slot lock
-     * above is independent; a mapping retains this lease until unmap. */
+     * above is independent; a mapping retains this lease until unmap.
+     * A failed release is an I/O failure, including after a successful write. */
     bool (*acquire_flash_io)(void *context);
-    void (*release_flash_io)(void *context);
+    bool (*release_flash_io)(void *context);
     void *flash_io_context;
 } econtainer_slots_idf_config_t;
 
@@ -38,7 +39,7 @@ typedef struct {
     const esp_partition_t *package_partition;
     SemaphoreHandle_t storage_lock;
     bool (*acquire_flash_io)(void *context);
-    void (*release_flash_io)(void *context);
+    bool (*release_flash_io)(void *context);
     void *flash_io_context;
     char nvs_partition_label[16];
     char nvs_namespace[16];

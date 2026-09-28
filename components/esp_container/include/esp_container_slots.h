@@ -125,10 +125,12 @@ typedef struct {
      * Called only under this same lock. Success exposes exactly size_bytes
      * immutable bytes until flash_unmap; failure leaves no mapping and clears
      * both outputs. A successful handle may be zero. No write/commit is allowed
-     * between map and unmap. These are short-lived loader resources, not leases. */
+     * between map and unmap. These are short-lived loader resources, not leases.
+     * Unmap returns false when resource or physical I/O lease release fails;
+     * the loader must close any new runtime and return an I/O failure. */
     bool (*flash_map)(void *context, uint32_t offset_bytes, size_t size_bytes,
                       const uint8_t **mapped, uintptr_t *handle);
-    void (*flash_unmap)(void *context, uintptr_t handle);
+    bool (*flash_unmap)(void *context, uintptr_t handle);
     void *context;
 } econtainer_slots_io_t;
 

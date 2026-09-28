@@ -14,6 +14,7 @@ struct test_semaphore { bool held; };
 static struct test_semaphore storage_lock;
 static bool flash_io_held, deny_flash_io;
 static unsigned flash_io_acquires, flash_io_releases;
+static unsigned flash_io_release_fail_at;
 
 static bool acquire_flash_io(void *context)
 {
@@ -24,11 +25,12 @@ static bool acquire_flash_io(void *context)
     return true;
 }
 
-static void release_flash_io(void *context)
+static bool release_flash_io(void *context)
 {
     assert(context == &storage_lock && storage_lock.held && flash_io_held);
     flash_io_held = false;
     ++flash_io_releases;
+    return flash_io_releases != flash_io_release_fail_at;
 }
 static esp_partition_t package_partition = {
     .type = ESP_PARTITION_TYPE_DATA,
@@ -94,6 +96,7 @@ static void reset(void)
     storage_lock.held = false;
     flash_io_held = deny_flash_io = false;
     flash_io_acquires = flash_io_releases = 0;
+    flash_io_release_fail_at = 0;
     namespace_exists = staged = false;
     fail_open = fail_get = fail_set = fail_commit = commit_then_fail = false;
     stored_size = 0;
@@ -353,6 +356,38 @@ static void test_provider_io(void)
            writes == 1 && erases == 1 && reads == 1);
 }
 
+static void test_flash_io_release_failure(void)
+{
+    econtainer_slots_idf_provider_t provider;
+    const econtainer_slots_idf_config_t selected = config();
+    assert(econtainer_slots_idf_bind(&provider, &selected));
+    assert(provider.io.lock(provider.io.context));
+    uint8_t blob[ECONTAINER_SLOT_BLOB_BYTES] = {0};
+    uint8_t bytes[16] = {0};
+    flash_io_release_fail_at = flash_io_releases + 1U;
+    assert(provider.io.read_blob(provider.io.context, blob) == ECONTAINER_SLOT_BLOB_READ_FAILED);
+    flash_io_release_fail_at = flash_io_releases + 1U;
+    assert(!provider.io.write_blob(provider.io.context, blob));
+    flash_io_release_fail_at = flash_io_releases + 1U;
+    assert(!provider.io.flash_read(provider.io.context, PACKAGE_BASE, bytes, sizeof bytes));
+    flash_io_release_fail_at = flash_io_releases + 1U;
+    assert(!provider.io.flash_erase(provider.io.context, PACKAGE_BASE, SECTOR_BYTES));
+    flash_io_release_fail_at = flash_io_releases + 1U;
+    assert(!provider.io.flash_write(provider.io.context, PACKAGE_BASE, bytes, sizeof bytes));
+
+    flash_io_release_fail_at = 0;
+    const uint8_t *mapped = NULL;
+    uintptr_t handle = 0;
+    assert(provider.io.flash_map(provider.io.context, PACKAGE_BASE, sizeof bytes,
+                                 &mapped, &handle));
+    assert(mapped != NULL && flash_io_held);
+    flash_io_release_fail_at = flash_io_releases + 1U;
+    assert(!provider.io.flash_unmap(provider.io.context, handle));
+    assert(!mapping_live && !flash_io_held);
+    provider.io.unlock(provider.io.context);
+    assert(flash_io_acquires == flash_io_releases);
+}
+
 static void test_provider_mapping(void)
 {
     econtainer_slots_idf_config_t selected = config();
@@ -374,14 +409,14 @@ static void test_provider_mapping(void)
     assert(flash_io_held);
     assert(mapped_offset == relative_offset && mapped_size == size);
     assert(memcmp(mapped, flash + relative_offset, size) == 0);
-    provider.io.flash_unmap(provider.io.context, handle);
+    assert(provider.io.flash_unmap(provider.io.context, handle));
     assert(!mapping_live && !flash_io_held && maps == 1 && unmaps == 1);
 
     next_map_handle = UINT32_MAX;
     assert(provider.io.flash_map(provider.io.context,
         PACKAGE_BASE + PACKAGE_BYTES - 1U, 1U, &mapped, &handle));
     assert(mapped == flash + PACKAGE_BYTES - 1U && mapped_size == 1U && handle == UINT32_MAX);
-    provider.io.flash_unmap(provider.io.context, handle);
+    assert(provider.io.flash_unmap(provider.io.context, handle));
     assert(!mapping_live && maps == 2 && unmaps == 2);
 
     const struct { uint32_t offset; size_t size; } invalid[] = {
@@ -577,6 +612,8 @@ int main(void)
     test_binding_guards();
     reset();
     test_provider_io();
+    reset();
+    test_flash_io_release_failure();
     reset();
     test_provider_mapping();
     reset();

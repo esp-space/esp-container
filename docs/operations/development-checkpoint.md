@@ -1,5 +1,9 @@
 # 开发检查点
 
+## 2026-09-29 物理 I/O 租约释放失败闭合
+
+IDF provider 的 `release_flash_io` 改为返回成功与否：NVS blob 与包 Flash 的读、擦、写在释放失败时均报告 I/O 失败，即使底层写入可能已经生效；调用方须从持久事实重新对账。映射解除后若租约释放失败，公开装载入口关闭刚创建的 WAMR runtime 并返回 `IO_FAILED`，不进入 guest。真实 WAMR 主机 CTest 9/9 通过，故障注入覆盖这些回调和装载路径。该结果只验证合成 SDK 与主机解释器，实板 Flash/NVS 故障和最长映射占用尚未测量。
+
 ## 2026-09-27 ESP32 五组件完整认证记录 QEMU 容量探针
 
 以 Base `1f43b6f`、FRP `1f0c8f3`、MQTT `9d6d95e`、OTA `2072731`、Container `8eb805f`、WAMR `26c235e` 和固定 ESP-IDF／lwIP 装配仓外 ESP32 镜像，临时 ECDSA v1 测试键签名文件 **1,114,100 B**、验签数据长 1,114,032 B，官方验签与 `0x120000` app 槽容量检查均通过。官方 Xtensa QEMU 两次运行在 Base READY 后得到 free／最大块 **147,340／110,592 B**；单页 ABI 2 guest 存活时为 **61,404／43,008 B**，两次完整 4 KiB AEAD 认证和逐字节比较通过，坏 tag 拒绝且无明文，完整 64 KiB 记录在第 14 块申请失败并清理。Base 初始化前同一 guest 与完整 64 KiB 记录则认证成功。探针无 ADC/Wi-Fi 空桩，但无真实 Wi-Fi／TLS／Broker／FRPS／OTA 及实板并发，P6-03 仍未验收。完整源码锁、trace、首次清理差额与复现命令见[独立报告](esp32-authenticated-qemu-capacity-probe.md)。未接设备或使用生产密钥。

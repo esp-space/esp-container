@@ -24,6 +24,7 @@ typedef struct {
     bool race;
     bool map_fail;
     bool map_null;
+    bool unmap_fail;
     bool read_fail;
     const file_t *wrong_mapping;
     uint8_t *mapping;
@@ -151,7 +152,7 @@ static bool map_flash(void *context, uint32_t offset, size_t size,
     return true;
 }
 
-static void unmap_flash(void *context, uintptr_t handle)
+static bool unmap_flash(void *context, uintptr_t handle)
 {
     store_t *store = context;
     assert(store->locked && handle == 0);
@@ -161,6 +162,7 @@ static void unmap_flash(void *context, uintptr_t handle)
     if (store->mapping != NULL) assert(munmap(store->mapping, store->mapping_size) == 0);
     store->mapping = NULL;
     store->mapping_size = 0;
+    return !store->unmap_fail;
 }
 
 static bool read_source(void *context, size_t offset, uint8_t *bytes, size_t size)
@@ -426,6 +428,9 @@ int main(int argc, char **argv)
         fixture->store.map_null = true;
         expect_rejection(fixture, &request, ECONTAINER_SLOTS_IO_FAILED);
         fixture->store.map_null = false;
+        fixture->store.unmap_fail = true;
+        expect_rejection(fixture, &request, ECONTAINER_SLOTS_IO_FAILED);
+        fixture->store.unmap_fail = false;
         fixture->store.wrong_mapping = &packages[(index + 1) % 4];
         expect_rejection(fixture, &request, ECONTAINER_SLOTS_UNTRUSTED);
         fixture->store.wrong_mapping = NULL;
