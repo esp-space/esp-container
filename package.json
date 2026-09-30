@@ -1,0 +1,17 @@
+{
+  "name": "esp-container",
+  "version": "0.1.0",
+  "private": true,
+  "description": "公开 product.pkg 主机验包 SDK；仅通过精确 Git 版本消费",
+  "type": "module",
+  "exports": {
+    "./product-package": {
+      "types": "./tools/product-package.d.ts",
+      "import": "./tools/product-package.mjs"
+    }
+  },
+  "files": ["tools/product-package.mjs", "tools/product-package.d.ts", "LICENSE"],
+  "scripts": {"test": "node --test tests/product-package.test.mjs"},
+  "engines": {"node": ">=22"},
+  "license": "Apache-2.0"
+}

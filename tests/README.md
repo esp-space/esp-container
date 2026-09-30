@@ -69,3 +69,6 @@ C3 单页分支以固定 wasi-sdk 33 生成 64 KiB counter 与宿主 API guest�
 主机测试不能证明设备流式 Flash 读回、C3 运行时内存/期限、掉电恢复或真实 C3 组合。对应实板任务与阻塞在跨仓主计划 P6/P7 中记录。
 
 ABI 2 回归另用 `memory_guest.c` 的显式 Wasm load/store 覆盖全部 65,536 字节写入读回、末字节访问、`memory.size=1`、`memory.grow(1)=-1` 和页外 load/store/跨页 load trap；在同一实例验证 4,096 字节最大事件及返回后的事件区清零。签名 host/设备负例覆盖旧四导出、错误 global 索引/类型/可变性、零/负值/跨页地址、畸形有符号 LEB；WAMR 实例另拒绝缺失/可变/负值/零事件区。原生侧不再为每次事件分配附加 guest heap。
+
+
+公开浏览器 SDK 的独立测试为 `npm test`，使用原生 Web Crypto 和真实签名向量，不执行 guest。Python 全量 `unittest` 在 Node 22+ 可用时运行 `browser_package_test.py`，对独立签名的清单／Wasm／归档正负输入与同一 Python 验包器逐项比对；缺少 Node 会明确跳过该项，不能计为浏览器合同通过。

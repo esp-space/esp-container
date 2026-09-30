@@ -1,6 +1,6 @@
 # ESP Container
 
-`esp-container` 是面向 ESP-IDF 的业务包运行组件。当前提供独立 `esp_container` IDF 组件、受限 Wasm 扫描器、counter guest 的固定 freestanding 构建与静态检查、公开 guest SDK 草案、确定性 ustar 打包与 RSA-3072/PSS 验包工具、只读回调式设备验包及 Wasm ABI/能力检查切片、三槽原始 Flash 存储软件切片、双固件集合对账与联合固件/包切换的单 blob 状态合同、精确分区前置的 ESP-IDF Flash/NVS provider，以及 WAMR Classic 单实例运行切片。三槽候选回读组合签名包、Wasm 与独立产品/配额授权；公开产品生命周期入口仅从实际确认绑定或本 boot 的精确试运行记录装载，组件内部在同一槽锁下重新验包授权、短时映射并完成 WAMR 装载，裸 Wasm 装载仍是私有接口。运行期使用 ABI 2 的页内事件区，保持完整 64 KiB 标准内存边界，并提供逐项授权的单调时间、有界日志和受配额定时器导入。实际专用包分区、完整签名包安装、Base 联合升级与实板容量尚未完成，当前代码只可作为研发检查点。
+`esp-container` 是面向 ESP-IDF 的业务包运行组件。当前提供独立 `esp_container` IDF 组件、受限 Wasm 扫描器、counter guest 的固定 freestanding 构建与静态检查、公开 guest SDK 草案、确定性 ustar 打包与 RSA-3072/PSS 验包工具、浏览器／Node Web Crypto 验包 SDK、只读回调式设备验包及 Wasm ABI/能力检查切片、三槽原始 Flash 存储软件切片、双固件集合对账与联合固件/包切换的单 blob 状态合同、精确分区前置的 ESP-IDF Flash/NVS provider，以及 WAMR Classic 单实例运行切片。三槽候选回读组合签名包、Wasm 与独立产品/配额授权；公开产品生命周期入口仅从实际确认绑定或本 boot 的精确试运行记录装载，组件内部在同一槽锁下重新验包授权、短时映射并完成 WAMR 装载，裸 Wasm 装载仍是私有接口。运行期使用 ABI 2 的页内事件区，保持完整 64 KiB 标准内存边界，并提供逐项授权的单调时间、有界日志和受配额定时器导入。实际专用包分区、完整签名包安装、Base 联合升级与实板容量尚未完成，当前代码只可作为研发检查点。
 
 `econtainer_slots_uninstall` 可在 Base 停止并回收当前确认实例后，以精确包摘要和固件集合清除当前固件的包绑定。它持久读回 `NO_PACKAGE` 终态，保留回退固件绑定和包 Flash 字节；Base 的公开卸载命令已接入持久账本、同 boot 空绑定读回与运行重启；实板验证仍待完成。详见[三包槽存储检查点](docs/operations/three-slot-storage-checkpoint.md)。
 
@@ -17,6 +17,8 @@ flowchart LR
     guest --> wasm["标准 app.wasm"]
     wasm --> tool["tools/product_package.py：清单 / 签名 / ustar 验证"]
     tool --> pkg["product.pkg：manifest / signature / app.wasm"]
+    pkg --> browser_sdk["tools/product-package.mjs：公开浏览器 SDK / 同一签名包与 Wasm 静态合同"]
+    browser_sdk --> tool_web["Tool Web：独立公钥 / 精确版本依赖 / 本地签名包导入"]
     pkg --> verifier["esp_container：有界流式验包 / 信任锚验签"]
     verifier --> scanner["esp_container：只读 Wasm ABI / 导入 / 能力检查"]
     scanner --> admission["包槽回读准入：签名 / 产品 / schema / 配额"]
@@ -56,6 +58,8 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+浏览器／Node 的公开 host SDK 使用 `npm test`；不依赖 IDF 或第三方 Node 包。Python 全量测试在 Node 22+ 可用时，另对独立生成的正确签名、错误清单／归档／Wasm 字节与该 SDK 做接受结果及元数据交叉比对。浏览器需要安全上下文的 Web Crypto；这里只验包，不实例化或执行 guest，也不发设备命令。
 
 完成 C3 样例构建并核对 `dependencies.lock` 后，可用其锁定的 WAMR 源码运行真实 Classic 解释器主机测试：
 
