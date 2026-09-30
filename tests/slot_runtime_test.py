@@ -31,7 +31,8 @@ def main() -> None:
             serialization.Encoding.DER, serialization.PublicFormat.PKCS1))
         for index in range(4):
             current = copy.deepcopy(spec)
-            current["product_version"] = f"v0-1-{index}"
+            current["product_version"] = "v" + "0" * 2999 if index == 1 else f"v0-1-{index}"
+            (temporary / f"p{index}-version.txt").write_text(current["product_version"], encoding="ascii")
             wasm = counter if index < 2 else counter_v2
             (temporary / f"p{index}.pkg").write_bytes(signed_package(private, wasm, current))
         for name, field, limit in (("budget", "instruction_budget", 1),

@@ -75,6 +75,16 @@ typedef struct {
      * to bind its external event queue; failure leaves both fields zero. */
     uint32_t event_queue_limit;
     uint8_t package_sha256[32];
+    /* Freshly admitted manifest metadata. Identifier slices refer to the
+     * caller's validation.package_workspace->manifest after return, until that
+     * workspace is modified. No mapping or runtime-owned pointer escapes.
+     * All metadata stays zero unless both results are OK and runtime is live. */
+    size_t product_id_offset_bytes;
+    size_t product_id_size_bytes;
+    size_t product_version_offset_bytes;
+    size_t product_version_size_bytes;
+    uint32_t guest_abi_version;
+    uint32_t data_schema_version;
 } econtainer_slot_runtime_result_t;
 
 /* Base owns the outer app/otadata and package-operation serialization. The
@@ -91,7 +101,9 @@ typedef struct {
  * with the independent runtime_limits. out must point to NULL.
  * On ESP-IDF the unique executor owner must be a pthread_create thread. A
  * successful result also returns the reverified signed queue limit and package
- * digest, so the caller need not trust an earlier admission snapshot. */
+ * digest and manifest identifier slices/ABI/schema, so the caller need not
+ * trust an earlier admission snapshot. Copy identifier bytes before reusing
+ * the validation workspace; the package format's manifest bound is unchanged. */
 econtainer_slot_runtime_result_t econtainer_product_open(
     const econtainer_slots_io_t *io, const econtainer_slots_geometry_t *geometry,
     const econtainer_slot_selection_request_t *request,

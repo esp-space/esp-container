@@ -6,6 +6,8 @@
 
 `econtainer_product_open` 只有在实际选中包从 Flash 重新验签、授权并成功创建 runtime 后，才向 Base 返回签名清单中的事件队列额度及包 SHA-256；拒绝和运行时创建失败时这两项均为零。Base 据此限制外部业务事件入队，并将事件绑定到当前包身份。
 
+装载成功现同时返回本次验签清单的产品 ID／完整版本切片和 ABI／data schema。切片位于调用方的 `validation.package_workspace->manifest`，解除 Flash 映射后仍可读取，工作区被修改前必须完成复制；组件不返回映射地址，也不另建版本缓存。仅 slots／runtime 均为 OK 且实例非空时填充，失败时六项元数据均为零。版本仍受既有整份 4096 字节清单上限约束，没有新增 64 字节限制。确认绑定与 trial 的精确选择合同保持；这些元数据不代替 init、健康或持久确认，也尚未接通 Base／Tool 的实际版本展示。
+
 ESP-IDF provider 要求调用方分别提供槽操作锁与物理 I/O 租约回调。包分区读、擦、写及专用 NVS blob 的一次访问各自获取和释放租约；释放失败使该次操作返回 I/O 失败。映射在 map 至 unmap 期间持有租约；解除映射时释放失败会关闭刚装载的 runtime，阻止 guest 入口。映射窗口还包含验包与解释器装载，其时长上界仍须测量。Base 的装配把租约接到 FRP scratch 使用的 owner；完整 app/其他 NVS 仲裁及实板并发仍待验证。
 
 ## 架构拓扑

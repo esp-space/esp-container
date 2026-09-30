@@ -60,6 +60,8 @@ Python 测试使用每次生成的 RSA-3072 临时测试密钥，覆盖确定性
 
 同一测试拒绝 PREPARED、HEALTH_VERIFIED、旧 boot、错误 operation/sequence/固件集合，拒绝映射成另一份完整合法签名包、错误产品、独立授权和超限 policy。映射使用真实只读 `mmap`，在返回实例之前立即 `munmap`；含非空 data 节的宿主导入 guest 随后仍读出 `init` 和 `first`。合法签名中 1 条指令、8 字节执行栈分别使 counter 触发指令额度和引擎栈失败，证明较大的平台默认值没有覆盖签名限额；非法平台栈、全局 runtime BUSY 和真实 WAMR loader 拒绝也必须清理映射且允许重新打开确认包。装载返回的 `slots` 与 `runtime` 两个结果分别断言，只有二者均为 OK 才执行 guest。映射失败不解映射，成功映射包括 NULL 指针的错误 provider 情形均恰好清理一次。两个 pthread 在映射建立后及 WAMR open 后通过条件变量安排真实竞争 `reserve/write_and_prepare`，两次均返回 BUSY，擦写计数不变；没有用睡眠猜测并发时序。
 
+装载元数据回归逐项核对真实签名 P0→P3 的产品 ID、完整版本与 ABI/schema，在返回时确认映射已解除且槽锁已释放，再从调用方工作区读取标识切片。P1 使用独立生成的 3000 字节版本名，预期字节另存为测试输入，按原包摘要匹配实际选择，覆盖 trial／确认及旧包恢复；不以旧 `verified_info` 推断当前版本。所有存储拒绝、映射解除失败、全局 BUSY、授权或真实引擎失败均检查六项元数据为零。组件未新增 heap 缓存或第二次验包。
+
 IDF provider 假件另覆盖非对齐映射、最后一字节、长度/地址越界、0/最大合法 handle、SDK 失败与成功但 NULL 的清理，核对 `DATA | BLOCKS_WRITE` 及精确分区相对偏移。所有映射路径必须处于共享槽锁内，解除映射前不允许 Flash 擦写、NVS commit 或解锁。这些是合成存储与真实解释器的软件验证，未调用 Base 的物理分区或生产信任锚。
 
 C3 单页分支以固定 wasi-sdk 33 生成 64 KiB counter 与宿主 API guest，并构造结构正确的旧两页 counter 作为负例。主机打包、设备包槽回读静态扫描和私有运行期都拒绝两页 guest；旧清单的 128 KiB 内存限额也分别由主机及设备端拒绝。该回归只证明限额接线，不证明 FRP/TLS/MQTT 与 guest 同时运行。

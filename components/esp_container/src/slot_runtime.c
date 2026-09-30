@@ -17,6 +17,12 @@ typedef struct {
     econtainer_runtime_result_t runtime_result;
     uint32_t event_queue_limit;
     uint8_t package_sha256[32];
+    size_t product_id_offset_bytes;
+    size_t product_id_size_bytes;
+    size_t product_version_offset_bytes;
+    size_t product_version_size_bytes;
+    uint32_t guest_abi_version;
+    uint32_t data_schema_version;
 } slot_runtime_open_t;
 
 static bool read_mapped(void *context, size_t offset_bytes,
@@ -77,6 +83,12 @@ static econtainer_slots_result_t open_selected(void *context,
                 info.wasm_size_bytes, &limits, open->out);
             if (open->runtime_result == ECONTAINER_RUNTIME_OK && *open->out != NULL) {
                 open->event_queue_limit = info.event_queue_limit;
+                open->product_id_offset_bytes = info.product_id_offset_bytes;
+                open->product_id_size_bytes = info.product_id_size_bytes;
+                open->product_version_offset_bytes = info.product_version_offset_bytes;
+                open->product_version_size_bytes = info.product_version_size_bytes;
+                open->guest_abi_version = info.guest_abi_version;
+                open->data_schema_version = info.data_schema_version;
                 memcpy(open->package_sha256, info.package_sha256,
                        sizeof open->package_sha256);
             }
@@ -117,8 +129,14 @@ econtainer_slot_runtime_result_t econtainer_slot_runtime_open(
                                                            open_selected, &open);
     result.runtime = open.runtime_result;
     if (result.slots == ECONTAINER_SLOTS_OK &&
-        result.runtime == ECONTAINER_RUNTIME_OK) {
+        result.runtime == ECONTAINER_RUNTIME_OK && *out != NULL) {
         result.event_queue_limit = open.event_queue_limit;
+        result.product_id_offset_bytes = open.product_id_offset_bytes;
+        result.product_id_size_bytes = open.product_id_size_bytes;
+        result.product_version_offset_bytes = open.product_version_offset_bytes;
+        result.product_version_size_bytes = open.product_version_size_bytes;
+        result.guest_abi_version = open.guest_abi_version;
+        result.data_schema_version = open.data_schema_version;
         memcpy(result.package_sha256, open.package_sha256,
                sizeof result.package_sha256);
     }

@@ -21,7 +21,9 @@
  * duration remain independent platform policy. Queue/storage/individual host
  * timeout are still admission-only; this bridge does not add those facilities.
  * Successful open exports the freshly verified queue limit and package digest
- * to let the caller own a matching event queue. */
+ * and freshly verified manifest metadata to let the caller own a matching event
+ * queue and report its actual selected product. Identifier slices are in the
+ * caller workspace, valid until it is modified, never in the unmapped Flash. */
 econtainer_slot_runtime_result_t econtainer_slot_runtime_open(
     const econtainer_slots_io_t *io, const econtainer_slots_geometry_t *geometry,
     const econtainer_slot_selection_request_t *request,

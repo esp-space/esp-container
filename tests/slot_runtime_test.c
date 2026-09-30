@@ -200,6 +200,8 @@ typedef struct {
     econtainer_runtime_limits_t limits;
     uint8_t boot[ECONTAINER_SLOT_BOOT_ID_BYTES];
     uint8_t next_operation;
+    uint8_t counter_package_sha256[4][32];
+    file_t counter_versions[4];
 } fixture_t;
 
 static void initialize(fixture_t *fixture, const file_t *key)
@@ -265,8 +267,17 @@ static econtainer_slot_selection_request_t request_for(fixture_t *fixture, bool 
 static econtainer_slot_runtime_result_t open_request(fixture_t *fixture,
     const econtainer_slot_selection_request_t *request, econtainer_runtime_t **runtime)
 {
-    return econtainer_product_open(&fixture->io, &geometry, request,
-        &fixture->validation, &fixture->limits, runtime);
+    const econtainer_slot_runtime_result_t result = econtainer_product_open(
+        &fixture->io, &geometry, request, &fixture->validation, &fixture->limits, runtime);
+    if (result.slots != ECONTAINER_SLOTS_OK || result.runtime != ECONTAINER_RUNTIME_OK) {
+        assert(result.product_id_offset_bytes == 0U);
+        assert(result.product_id_size_bytes == 0U);
+        assert(result.product_version_offset_bytes == 0U);
+        assert(result.product_version_size_bytes == 0U);
+        assert(result.guest_abi_version == 0U);
+        assert(result.data_schema_version == 0U);
+    }
+    return result;
 }
 
 static void expect_rejection(fixture_t *fixture,
@@ -339,6 +350,22 @@ static void run_counter(fixture_t *fixture, bool trial, int32_t expected_result)
     assert(selected_digest != NULL && result.event_queue_limit == 8U &&
            memcmp(result.package_sha256, selected_digest, 32) == 0);
     assert(runtime != NULL && fixture->store.mapping == NULL && !fixture->store.locked);
+    assert(result.guest_abi_version == 2U && result.data_schema_version == 1U);
+    assert(result.product_id_size_bytes == 7U &&
+           result.product_id_offset_bytes <= ECONTAINER_PACKAGE_MANIFEST_MAX_BYTES - 7U);
+    assert(memcmp(fixture->package_workspace.manifest + result.product_id_offset_bytes,
+                  "counter", 7U) == 0);
+    bool version_matched = false;
+    for (unsigned index = 0; index < 4; ++index) {
+        if (memcmp(result.package_sha256, fixture->counter_package_sha256[index], 32) != 0) continue;
+        const file_t *version = &fixture->counter_versions[index];
+        assert(result.product_version_size_bytes == version->size &&
+               result.product_version_offset_bytes <= ECONTAINER_PACKAGE_MANIFEST_MAX_BYTES - version->size);
+        assert(memcmp(fixture->package_workspace.manifest + result.product_version_offset_bytes,
+                      version->bytes, version->size) == 0);
+        version_matched = true;
+    }
+    assert(version_matched);
     assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
     const uint8_t event[] = {1, 2, 3};
     int32_t value = -1;
@@ -398,6 +425,13 @@ int main(int argc, char **argv)
     fixture_t *fixture = malloc(sizeof(*fixture));
     assert(fixture != NULL);
     initialize(fixture, &key);
+    for (unsigned index = 0; index < 4; ++index) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "p%u-version.txt", index);
+        fixture->counter_versions[index] = read_file(argv[1], name);
+        assert(SHA256(packages[index].bytes, packages[index].size,
+                      fixture->counter_package_sha256[index]) != NULL);
+    }
     econtainer_slot_selection_request_t request = request_for(fixture, false);
     expect_rejection(fixture, &request, ECONTAINER_SLOTS_EMPTY);
     for (unsigned index = 0; index < 4; ++index) {
@@ -572,6 +606,7 @@ int main(int argc, char **argv)
     assert(pthread_mutex_destroy(&fixture->store.lock) == 0);
     printf("slot_runtime: P0-P3, exact identity/grants, transient mappings=%u, competing writers, real WAMR passed\n",
            fixture->store.mapped);
+    for (unsigned index = 0; index < 4; ++index) free(fixture->counter_versions[index].bytes);
     free(fixture);
     for (unsigned index = 0; index < 9; ++index) free(packages[index].bytes);
     free(key.bytes);
