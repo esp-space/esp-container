@@ -8,7 +8,7 @@
 
 装载成功现同时返回本次验签清单的产品 ID／完整版本切片和 ABI／data schema。切片位于调用方的 `validation.package_workspace->manifest`，解除 Flash 映射后仍可读取，工作区被修改前必须完成复制；组件不返回映射地址，也不另建版本缓存。仅 slots／runtime 均为 OK 且实例非空时填充，失败时六项元数据均为零。版本仍受既有整份 4096 字节清单上限约束，没有新增 64 字节限制。确认绑定与 trial 的精确选择合同保持；这些元数据不代替 init、健康或持久确认。Base／Tool 的独立候选已消费对应 C 接口，接通实际版本与 trial 回读；双板实物与正式发布仍待验收。
 
-[Go 主机 SDK](host/README.md)现提供同一 `product.pkg` v1 的标准库验包入口，供 Go Server 在制品登记前独立核对可信公钥、完整包字节、签名清单与 Wasm 静态合同。源码由本仓拥有，消费者通过精确 Go module 版本消费；不增加 Node／Python 服务运行依赖。
+[Go 主机 SDK](host/README.md)现提供同一 `product.pkg` v1 的标准库验包入口，供 Go Server 在制品登记前独立核对可信公钥、完整包字节、签名清单与 Wasm 静态合同。源码由本仓拥有，消费者通过精确 Go module 版本消费；不增加 Node／Python 服务运行依赖。规范清单编解码供验签后元数据持久化使用，单独编解码不证明签名有效。
 
 ESP-IDF provider 要求调用方分别提供槽操作锁与物理 I/O 租约回调。包分区读、擦、写及专用 NVS blob 的一次访问各自获取和释放租约；释放失败使该次操作返回 I/O 失败。映射在 map 至 unmap 期间持有租约；解除映射时释放失败会关闭刚装载的 runtime，阻止 guest 入口。映射窗口还包含验包与解释器装载，其时长上界仍须测量。Base 的装配把租约接到 FRP scratch 使用的 owner；完整 app/其他 NVS 仲裁及实板并发仍待验证。
 

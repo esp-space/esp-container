@@ -20,6 +20,8 @@ if err != nil { /* 不登记、不投递；失败结果为零值 */ }
 
 `Verify` 在有界检查后复制包与公钥，返回值不引用输入 buffer；调用方不得在调用期间并发修改输入 slice。返回的是调用方拥有的 Go 值，不保存 SDK 全局可变结果。主机验包结果用于制品登记前的内容核验；设备仍须独立执行平台产品／能力／配额授权、从候选 Flash 回读验签、WAMR 指令装载和试运行确认。静态扫描通过不证明业务运行或安装成功。
 
+`EncodeManifest`／`DecodeManifest` 提供同一规范清单的有界编解码，供已验签元数据的持久化与回读使用；它们仅检查 schema 和规范字节，不产生签名证明或设备授权。登记写入口必须先验证完整包，不能把单独解码的清单当作已验签结果。编码会检查全部字段、数值和 4096 字节上限，失败不返回候选字节。
+
 在本目录执行：
 
 ```bash
@@ -28,6 +30,7 @@ go test -race ./...
 go vet ./...
 go test ./productpkg -run='^$' -fuzz='^FuzzVerify$' -fuzztime=15s -parallel=2
 go test ./productpkg -run='^$' -fuzz='^FuzzWasmReader$' -fuzztime=15s -parallel=2
+go test ./productpkg -run='^$' -fuzz='^FuzzManifestCodec$' -fuzztime=15s -parallel=2
 ```
 
 `productpkg/testdata/` 保存[公开签名向量](../tests/vectors/product-v1/README.md)的 package／PEM 固定字节，让独立 Go module 归档也可测试；Python 回归逐字节核对它们与唯一公开向量。Go 单测还使用进程内的一次性测试密钥覆盖重签名的错误清单、错误 PSS 参数、长版本与输入归属。它们不构成生产信任锚。仓库根 Python 测试向 Python、浏览器和 Go 提交同一组 37 个独立签名输入，对照接受判断与完整清单／摘要；包括完整 3000 字节版本、清单 4096／4097 字节和 Wasm 512 KiB 边界。Go helper 位于 `tests/`，只用于该跨实现测试。

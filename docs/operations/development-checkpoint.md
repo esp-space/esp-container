@@ -1,5 +1,11 @@
 # 开发检查点
 
+## 2026-09-30 Go 规范清单持久化接口
+
+Go SDK 新增 `EncodeManifest`／`DecodeManifest`，沿用唯一 v1 schema、规范 JSON、完整版本与 4096 字节上限，服务已验签元数据的登记及回读。接口只处理清单，不验签、不执行 guest、不授予权限；调用方的登记工厂仍须先 `Verify` 完整原始包。
+
+公开固定向量的精确清单 round-trip、3000 字节版本、输入归属、布尔／重复字段／ABI／非规范字节与超限拒绝通过。全量 Go race／vet 通过；规范清单 codec 的 15 秒 fuzz 完成 1,011,030 次执行，所有接受字节重编码均逐字节一致。新增源码只在 host module，不修改 C/IDF 合同。
+
 ## 2026-09-30 Go 主机验包 SDK
 
 `host/` 新增独立 Go module，`productpkg` 仅依赖标准库，严格复用现有 v1 包格式、独立 RSA-3072/SPKI 信任锚、固定 PSS 参数与 Classic ABI 2 静态合同。规范数字、重复／未知字段、完整 ID／版本、清单与 Wasm 上限逐项检查；所有验证失败返回零值，不暴露半验证元数据。SDK 不执行 guest，设备平台授权、候选 Flash 回读与试运行仍由实际设备完成。
