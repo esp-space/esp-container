@@ -36,6 +36,7 @@ entrypoints:
   - components/esp_container/include/esp_container.h
   - guest-sdk/include/econtainer_guest.h
   - tools/product_package.py
+  - host/README.md
   - examples/c3-runtime/README.md
   - docs/design/source-provenance.md
   - docs/operations/development-checkpoint.md

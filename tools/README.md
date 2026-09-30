@@ -62,4 +62,6 @@ const result = await verifyProductPackage(packageBytes, {
 
 `maxWasmBytes` 和 `maxPackageBytes` 只能在当前公开解析上限内进一步收紧；默认 Wasm 上限 512 KiB，包上限为该值＋4096＋8192字节，实际槽容量由设备装配另外裁决。输入超限、非规范归档／清单、错误公钥／key ID、签名或载荷不符均拒绝。主机验包成功不授予设备产品权限、不证明实际固件支持或已安装；设备仍须按独立平台授权从候选 Flash 重新验签、校验配额、运行试验并报告持久原操作结果。
 
-`npm test` 直接验证公开真实签名向量、错误 RSA 位数／PSS 参数、同一调用的输入变更、重新签名的畸形清单与 Wasm。Python 的 `tests/browser_package_test.py` 向 Node Web Crypto SDK 提交31份独立 tarfile/cryptography生成的输入，逐项对照公开 Python 验包器的接受判断、完整清单和包摘要；无需生产私钥或设备。
+`npm test` 直接验证公开真实签名向量、错误 RSA 位数／PSS 参数、同一调用的输入变更、重新签名的畸形清单与 Wasm。Python 的 `tests/browser_package_test.py` 向 Node Web Crypto SDK 提交 37 份独立 tarfile/cryptography 生成的输入，逐项对照公开 Python 验包器的接受判断、完整清单和包摘要；无需生产私钥或设备。
+
+同一组跨实现输入现扩展为 37 份，补充完整 3000 字节版本、4096／4097 字节清单、uint32 最大 schema 与 512 KiB Wasm 边界。[Go SDK](../host/README.md)由本仓独立 `host/` module 提供，严格消费同一包格式与独立信任锚；Python、浏览器、Go 的接受结果与签名清单／摘要逐项核对。实际设备槽容量和安装授权仍由平台装配裁决。

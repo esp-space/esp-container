@@ -6,7 +6,9 @@
 
 `econtainer_product_open` 只有在实际选中包从 Flash 重新验签、授权并成功创建 runtime 后，才向 Base 返回签名清单中的事件队列额度及包 SHA-256；拒绝和运行时创建失败时这两项均为零。Base 据此限制外部业务事件入队，并将事件绑定到当前包身份。
 
-装载成功现同时返回本次验签清单的产品 ID／完整版本切片和 ABI／data schema。切片位于调用方的 `validation.package_workspace->manifest`，解除 Flash 映射后仍可读取，工作区被修改前必须完成复制；组件不返回映射地址，也不另建版本缓存。仅 slots／runtime 均为 OK 且实例非空时填充，失败时六项元数据均为零。版本仍受既有整份 4096 字节清单上限约束，没有新增 64 字节限制。确认绑定与 trial 的精确选择合同保持；这些元数据不代替 init、健康或持久确认，也尚未接通 Base／Tool 的实际版本展示。
+装载成功现同时返回本次验签清单的产品 ID／完整版本切片和 ABI／data schema。切片位于调用方的 `validation.package_workspace->manifest`，解除 Flash 映射后仍可读取，工作区被修改前必须完成复制；组件不返回映射地址，也不另建版本缓存。仅 slots／runtime 均为 OK 且实例非空时填充，失败时六项元数据均为零。版本仍受既有整份 4096 字节清单上限约束，没有新增 64 字节限制。确认绑定与 trial 的精确选择合同保持；这些元数据不代替 init、健康或持久确认。Base／Tool 的独立候选已消费对应 C 接口，接通实际版本与 trial 回读；双板实物与正式发布仍待验收。
+
+[Go 主机 SDK](host/README.md)现提供同一 `product.pkg` v1 的标准库验包入口，供 Go Server 在制品登记前独立核对可信公钥、完整包字节、签名清单与 Wasm 静态合同。源码由本仓拥有，消费者通过精确 Go module 版本消费；不增加 Node／Python 服务运行依赖。
 
 ESP-IDF provider 要求调用方分别提供槽操作锁与物理 I/O 租约回调。包分区读、擦、写及专用 NVS blob 的一次访问各自获取和释放租约；释放失败使该次操作返回 I/O 失败。映射在 map 至 unmap 期间持有租约；解除映射时释放失败会关闭刚装载的 runtime，阻止 guest 入口。映射窗口还包含验包与解释器装载，其时长上界仍须测量。Base 的装配把租约接到 FRP scratch 使用的 owner；完整 app/其他 NVS 仲裁及实板并发仍待验证。
 
@@ -21,6 +23,8 @@ flowchart LR
     tool --> pkg["product.pkg：manifest / signature / app.wasm"]
     pkg --> browser_sdk["tools/product-package.mjs：公开浏览器 SDK / 同一签名包与 Wasm 静态合同"]
     browser_sdk --> tool_web["Tool Web：独立公钥 / 精确版本依赖 / 本地签名包导入"]
+    pkg --> go_sdk["host/productpkg：公开 Go SDK / 独立信任锚 / 同一验包合同"]
+    go_sdk --> tool_server["Tool Server：精确 Go module 版本 / 主机验包入口"]
     pkg --> verifier["esp_container：有界流式验包 / 信任锚验签"]
     verifier --> scanner["esp_container：只读 Wasm ABI / 导入 / 能力检查"]
     scanner --> admission["包槽回读准入：签名 / 产品 / schema / 配额"]
@@ -55,13 +59,15 @@ IDF 组件物理路径为 `components/esp_container`，其名称与仓库 `esp-c
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -p '*test*.py' -v
 cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
 浏览器／Node 的公开 host SDK 使用 `npm test`；不依赖 IDF 或第三方 Node 包。Python 全量测试在 Node 22+ 可用时，另对独立生成的正确签名、错误清单／归档／Wasm 字节与该 SDK 做接受结果及元数据交叉比对。浏览器需要安全上下文的 Web Crypto；这里只验包，不实例化或执行 guest，也不发设备命令。
+
+Go SDK 在 `host/` 执行 `go test ./...`、`go test -race ./...` 和 `go vet ./...`；Python 全量测试在 Go 可用时另核对 37 份独立签名输入与返回元数据。无 Go 时该项明确跳过；Go module 归档可独立执行固定向量与负例测试。
 
 完成 C3 样例构建并核对 `dependencies.lock` 后，可用其锁定的 WAMR 源码运行真实 Classic 解释器主机测试：
 
