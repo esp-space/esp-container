@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import counter_guest  # noqa: E402
+import message_counter_guest  # noqa: E402
 
 
 def two_page_fixture(wasm: bytes) -> bytes:
@@ -51,6 +52,7 @@ def main() -> int:
     counter_guest.build(args.wasi_sdk, args.output_dir / "counter.wasm")
     counter_guest.build(args.wasi_sdk, args.output_dir / "counter-v2.wasm",
                         ROOT / "examples" / "counter-v2" / "counter.c")
+    message_counter_guest.build(args.wasi_sdk, args.output_dir / "message-counter.wasm")
     (args.output_dir / "two-page.wasm").write_bytes(
         two_page_fixture((args.output_dir / "counter.wasm").read_bytes()))
     clang = args.wasi_sdk / "bin" / "clang"

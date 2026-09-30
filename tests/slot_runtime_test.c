@@ -413,15 +413,93 @@ static void *competing_writer(void *context)
     return NULL;
 }
 
+static void message_event(econtainer_runtime_t *runtime, const uint8_t *event,
+                          size_t size_bytes, int32_t expected_result)
+{
+    int32_t result = INT32_MIN;
+    assert(econtainer_product_on_event(runtime, event, size_bytes, &result) ==
+           ECONTAINER_RUNTIME_OK && result == expected_result);
+}
+
+static void run_message_counter(fixture_t *fixture, const file_t *package)
+{
+    fixture->limits.max_timers = 1;
+    prepare(fixture, package);
+    begin_trial(fixture);
+    const econtainer_slot_selection_request_t request = request_for(fixture, true);
+    econtainer_runtime_t *runtime = NULL;
+    const econtainer_slot_runtime_result_t opened = open_request(fixture, &request, &runtime);
+    assert(opened.slots == ECONTAINER_SLOTS_OK && opened.runtime == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
+    const uint8_t state[] = {4}, count[] = {5}, pause[] = {2}, resume[] = {3};
+    const uint8_t message[] = {1, 2, 3}, another[] = {1, 4};
+    const uint8_t malformed[] = {2, 0}, unknown[] = {6}, empty_message[] = {1};
+    message_event(runtime, state, sizeof state, 0);
+    message_event(runtime, message, sizeof message, 2);
+    message_event(runtime, another, sizeof another, 3);
+    message_event(runtime, state, sizeof state, 1);
+    uint64_t deadline_ms = 0;
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline_ms) == ECONTAINER_RUNTIME_OK);
+    message_event(runtime, malformed, sizeof malformed, -1);
+    message_event(runtime, empty_message, sizeof empty_message, -1);
+    message_event(runtime, unknown, sizeof unknown, -1);
+    message_event(runtime, count, sizeof count, 3);
+    message_event(runtime, pause, sizeof pause, 3);
+    message_event(runtime, state, sizeof state, 2);
+    message_event(runtime, message, sizeof message, -2);
+    message_event(runtime, count, sizeof count, 3);
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline_ms) ==
+           ECONTAINER_RUNTIME_NO_TIMER);
+    message_event(runtime, resume, sizeof resume, 3);
+    message_event(runtime, state, sizeof state, 0);
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline_ms) ==
+           ECONTAINER_RUNTIME_NO_TIMER);
+    message_event(runtime, message, sizeof message, 5);
+    econtainer_timer_event_t timer_event = {0};
+    int32_t result = INT32_MIN;
+    econtainer_runtime_result_t polled = ECONTAINER_RUNTIME_NO_TIMER;
+    const struct timespec delay = {.tv_sec = 0, .tv_nsec = 5000000};
+    for (unsigned attempt = 0; attempt < 100U && polled == ECONTAINER_RUNTIME_NO_TIMER;
+         ++attempt) {
+        assert(nanosleep(&delay, NULL) == 0);
+        polled = econtainer_product_poll_timer(runtime, &timer_event, &result);
+    }
+    assert(polled == ECONTAINER_RUNTIME_OK && result == 5 && timer_event.handle != 0);
+    message_event(runtime, state, sizeof state, 0);
+    message_event(runtime, count, sizeof count, 5);
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline_ms) ==
+           ECONTAINER_RUNTIME_NO_TIMER);
+    message_event(runtime, message, sizeof message, 7);
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline_ms) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_poll_timer(runtime, &timer_event, &result) ==
+           ECONTAINER_RUNTIME_INVALID_STATE);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+    /* Reopen the same signed trial in the same firmware/boot: sample RAM starts
+     * empty, with no timer or count carried over from the prior instance. */
+    const econtainer_slot_runtime_result_t reopened = open_request(fixture, &request, &runtime);
+    assert(reopened.slots == ECONTAINER_SLOTS_OK && reopened.runtime == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
+    message_event(runtime, count, sizeof count, 0);
+    message_event(runtime, state, sizeof state, 0);
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline_ms) ==
+           ECONTAINER_RUNTIME_NO_TIMER);
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+    abandon(fixture);
+    run_counter(fixture, false, 6);
+    puts("message_counter: signed message/state/one-timer behavior, stop/reopen and old package restore passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
     file_t key = read_file(argv[1], "public.der");
     const char *names[] = {"p0.pkg", "p1.pkg", "p2.pkg", "p3.pkg",
                            "host.pkg", "budget.pkg", "stack.pkg", "bad-loader.pkg",
-                           "timer.pkg"};
-    file_t packages[9];
-    for (unsigned index = 0; index < 9; ++index) packages[index] = read_file(argv[1], names[index]);
+                           "timer.pkg", "message-counter.pkg"};
+    file_t packages[10];
+    for (unsigned index = 0; index < 10; ++index) packages[index] = read_file(argv[1], names[index]);
     fixture_t *fixture = malloc(sizeof(*fixture));
     assert(fixture != NULL);
     initialize(fixture, &key);
@@ -600,6 +678,7 @@ int main(int argc, char **argv)
     assert(econtainer_product_poll_timer(runtime, &timer_event, &guest_result) == ECONTAINER_RUNTIME_INVALID_STATE);
     assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
     abandon(fixture);
+    run_message_counter(fixture, &packages[9]);
     assert(fixture->store.mapped == fixture->store.unmapped && !fixture->store.locked);
     assert(pthread_cond_destroy(&fixture->store.condition) == 0);
     assert(pthread_mutex_destroy(&fixture->store.gate) == 0);
@@ -608,7 +687,7 @@ int main(int argc, char **argv)
            fixture->store.mapped);
     for (unsigned index = 0; index < 4; ++index) free(fixture->counter_versions[index].bytes);
     free(fixture);
-    for (unsigned index = 0; index < 9; ++index) free(packages[index].bytes);
+    for (unsigned index = 0; index < 10; ++index) free(packages[index].bytes);
     free(key.bytes);
     return 0;
 }

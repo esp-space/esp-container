@@ -1,5 +1,7 @@
 # ESP Container
 
+新增[消息计数产品样例](examples/message-counter/README.md)：counter v0-2-0 在原 ABI／包格式下提供二进制消息计数、三态与单个 100 ms 定时窗口，声明 timer 能力和零持久数据。公开固定构建器与签名包槽宿主回归可独立执行；保持 Base 现有精确依赖，双板正式安装仍待验收，不扩大平台授权。
+
 `esp-container` 是面向 ESP-IDF 的业务包运行组件。当前提供独立 `esp_container` IDF 组件、受限 Wasm 扫描器、counter guest 的固定 freestanding 构建与静态检查、公开 guest SDK 草案、确定性 ustar 打包与 RSA-3072/PSS 验包工具、浏览器／Node Web Crypto 验包 SDK、只读回调式设备验包及 Wasm ABI/能力检查切片、三槽原始 Flash 存储软件切片、双固件集合对账与联合固件/包切换的单 blob 状态合同、精确分区前置的 ESP-IDF Flash/NVS provider，以及 WAMR Classic 单实例运行切片。三槽候选回读组合签名包、Wasm 与独立产品/配额授权；公开产品生命周期入口仅从实际确认绑定或本 boot 的精确试运行记录装载，组件内部在同一槽锁下重新验包授权、短时映射并完成 WAMR 装载，裸 Wasm 装载仍是私有接口。运行期使用 ABI 2 的页内事件区，保持完整 64 KiB 标准内存边界，并提供逐项授权的单调时间、有界日志和受配额定时器导入。实际专用包分区、完整签名包安装、Base 联合升级与实板容量尚未完成，当前代码只可作为研发检查点。
 
 `econtainer_slots_uninstall` 可在 Base 停止并回收当前确认实例后，以精确包摘要和固件集合清除当前固件的包绑定。它持久读回 `NO_PACKAGE` 终态，保留回退固件绑定和包 Flash 字节；Base 的公开卸载命令已接入持久账本、同 boot 空绑定读回与运行重启；实板验证仍待完成。详见[三包槽存储检查点](docs/operations/three-slot-storage-checkpoint.md)。
@@ -16,7 +18,7 @@ ESP-IDF provider 要求调用方分别提供槽操作锁与物理 I/O 租约回�
 
 ```mermaid
 flowchart LR
-    product["counter 源码 / guest-sdk"] --> guest["counter_guest.py：受限编译 / ABI 检查"]
+    product["counter / 消息计数源码 / guest-sdk"] --> guest["固定 guest 构建器：受限编译 / ABI 检查"]
     wasi["固定 wasi-sdk 33"] --> guest
     guest --> wasm["标准 app.wasm"]
     wasm --> tool["tools/product_package.py：清单 / 签名 / ustar 验证"]

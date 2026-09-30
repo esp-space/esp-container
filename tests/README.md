@@ -1,5 +1,7 @@
 # 测试入口
 
+`slot_runtime` 新增真实签名[消息计数产品](../examples/message-counter/README.md)，使用原公开 product API 与一个 timer 配额验证消息／三态／真实到期／停止取消、同 boot 重开归零和旧确认包恢复。清单声明零持久数据；Flash/NVS、固件集合与健康仍为宿主夹具，未走 Base 公开网络安装或设备健康确认。
+
 `slots` CTest 的 product-only 卸载用精确包摘要和停止证明清除当前绑定，覆盖共享包槽、回退固件引用保留、后续预留避开回退槽、损坏回退包拒绝、NVS 写前失败与写后读回不确定。`slots_idf` CTest 在真实 `slots_idf.c` 回调下重建 provider，读回无包当前绑定和有包回退绑定，并覆盖 commit 失败和 commit 已生效但返回失败；另核对包 Flash／专用 NVS 操作持有短时 I/O 租约、获取失败不触碰存储、映射至解映射期间保留租约且释放失败返回 I/O 失败。`slot_runtime` CTest 还在解除映射失败时检查新 runtime 已关闭且 guest 未进入。该测试使用合成 SDK，不代表物理掉电或 Base 命令接线。
 
 ## 架构拓扑

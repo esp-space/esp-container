@@ -1,0 +1,17 @@
+{
+  "product_id": "counter",
+  "product_version": "v0-2-0",
+  "guest_abi_version": 2,
+  "required_capabilities": ["timer"],
+  "runtime_profile": "wamr-classic-v1",
+  "limits": {
+    "memory_limit_bytes": 65536,
+    "stack_limit_bytes": 4096,
+    "event_queue_limit": 8,
+    "instruction_budget": 100000,
+    "host_call_timeout_ms": 100,
+    "storage_limit_bytes": 0
+  },
+  "data_schema_version": 1,
+  "signing_key_id": "test-key"
+}

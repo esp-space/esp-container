@@ -1,5 +1,7 @@
 # product.pkg v1 主机工具
 
+新增 `message_counter_guest.py --wasi-sdk <root> --output <app.wasm>` 固定构建入口，供[消息计数产品](../examples/message-counter/README.md)编译有界状态与定时业务。它以现有 product_package.create_manifest 核对同一 ABI／能力合同；签名和验包仍由原四个命令完成，无导入 counter 的更窄检查保持。
+
 本目录的 `product_package.py` 提供 `manifest`、`sign`、`pack`、`verify` 四个命令。只处理精确顺序的 `manifest.json`、`signature.bin`、`app.wasm` 三个普通成员；签名域为 `ESP-CONTAINER-PRODUCT-V1` 加一个零字节，再加 manifest 的精确 UTF-8 字节。RSA-3072/PSS 使用 SHA-256、MGF1-SHA-256 和 32 字节 salt。公钥由调用方提供，包内不携带新信任锚。
 
 ## 架构拓扑
