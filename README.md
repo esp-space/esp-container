@@ -75,4 +75,4 @@ host 工具的包格式和使用步骤见 [包工具](tools/README.md)。[只读
 - [主机包工具](tools/README.md)
 - [C3 原型](examples/c3-runtime/README.md)
 - [测试](tests/README.md)
-- [嵌入式工程标准](https://github.com/darren-you/darren-space/blob/master/harness/docs/workspace/standards/embedded_firmware/embedded_firmware_golden_path.md)
+- [嵌入式工程标准](https://github.com/darren-you/darren-space/blob/master/harness/docs/workspace/standards/embedded-firmware/embedded_firmware_golden_path.md)
