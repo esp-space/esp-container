@@ -15,7 +15,7 @@
 | 仓外测试 | mac-work-1 的固定 SDK；新建 RSA-3072、P-256 测试键仅留在 `/private/tmp/esp-dual-signed-product-link-private-20260927/`，未复制进 Git、镜像 receipt 或产品 defaults |
 | 主应用 | Base Git 归档原样 `firmware/apps/esp_base/main`；无 `capacity_references.c`、`capacity_runtime_probe.c`、`runtime_guest_bytes.h`，也没有密文、guest 或虚构业务调用 |
 
-[准备脚本](prepare-dual-target-signed-product-link.py)先对五个完整提交执行 `git archive`，记录归档 SHA-256；装配阶段再次核对五归档和受锁 cJSON/WAMR 缓存摘要，仅把四个精确组件源码复制到各自仓外 Base 固件工程、追加 Container 的 target Kconfig defaults，并在工程外写入签名配置。Base 主应用、组件实现和产品分区表均未改动。[机器收据](dual-target-signed-product-link-receipt.json)保存上述 Git 归档 SHA、实际 SDK/lwIP、生成配置/依赖锁/分区表及 signed bin/ELF/map 摘要、签名检查结果、保留符号与各库成员。依赖锁中四个组件是仓外本地路径，来源由归档完整提交和摘要约束；不能把路径版本 `0.1.0` 当作源码版本。
+[准备脚本](prepare_dual_target_signed_product_link.py)先对五个完整提交执行 `git archive`，记录归档 SHA-256；装配阶段再次核对五归档和受锁 cJSON/WAMR 缓存摘要，仅把四个精确组件源码复制到各自仓外 Base 固件工程、追加 Container 的 target Kconfig defaults，并在工程外写入签名配置。Base 主应用、组件实现和产品分区表均未改动。[机器收据](dual-target-signed-product-link-receipt.json)保存上述 Git 归档 SHA、实际 SDK/lwIP、生成配置/依赖锁/分区表及 signed bin/ELF/map 摘要、签名检查结果、保留符号与各库成员。依赖锁中四个组件是仓外本地路径，来源由归档完整提交和摘要约束；不能把路径版本 `0.1.0` 当作源码版本。
 
 没有连接设备、Broker、FRPS 或 OTA 服务，也没有写 Flash、eFuse、NVS 或生产签名键。C3 原板旧 `base_store` 异常页和 ESP32 旧 AT 首次迁移仍由各自只读证据及恢复合同裁决；本次编译不能授权刷写。
 
@@ -50,8 +50,8 @@ ESP32 当前离线表已有两个 `0x120000` app 槽和 `product_pkgs@0x260000/0
 
 ## 复现
 
-在能读取五个精确提交的 checkout 上用[准备脚本](prepare-dual-target-signed-product-link.py)的 `export --base … --frp … --mqtt … --ota … --container … --output <bundle>` 生成仓外源码包；将包和脚本送到具备固定 SDK 的宿主。新建仓外测试 RSA-3072 与 P-256 键，然后以 `assemble --bundle <bundle> --output <probe> --managed-cache <固定 cJSON/WAMR 缓存> --c3-key <仓外 RSA 键> --esp32-key <仓外 P-256 键>` 准备两目标独立工程。目标路径须不存在；脚本拒绝覆盖。实际 mac-work-1 输入包位于 `/private/tmp/esp-dual-signed-product-link-inputs-20260927/`，工程位于 `/private/tmp/esp-dual-signed-product-link-20260927/`，五归档摘要在收据中。
+在能读取五个精确提交的 checkout 上用[准备脚本](prepare_dual_target_signed_product_link.py)的 `export --base … --frp … --mqtt … --ota … --container … --output <bundle>` 生成仓外源码包；将包和脚本送到具备固定 SDK 的宿主。新建仓外测试 RSA-3072 与 P-256 键，然后以 `assemble --bundle <bundle> --output <probe> --managed-cache <固定 cJSON/WAMR 缓存> --c3-key <仓外 RSA 键> --esp32-key <仓外 P-256 键>` 准备两目标独立工程。目标路径须不存在；脚本拒绝覆盖。实际 mac-work-1 输入包位于 `/private/tmp/esp-dual-signed-product-link-inputs-20260927/`，工程位于 `/private/tmp/esp-dual-signed-product-link-20260927/`，五归档摘要在收据中。
 
-分别在 `source "$IDF_PATH/export.sh"` 后构建；C3 的 `SDKCONFIG_DEFAULTS` 顺序为 Base 共用、`sdkconfig.defaults.esp32c3`、Container C3、仓外 `signed.defaults`，ESP32 换成对应的 target defaults。两者都传 `-DESP_BASE_CONTAINER_BINDING_PROBE=ON`，使用独立 `-B` 与 `-DSDKCONFIG`；ESP32 另传 `-DIDF_TARGET=esp32`，**不传**无签名离线开关。签名配置选择 C3 RSA v2 更新验签、ESP32 ECDSA v1 启动与更新验签，并保留两者的 rollback。通过固定 SDK 的 `espsecure verify-signature` 分别使用 `--version 2` / `--version 1` 校验完整 `.bin`；用目标工具链 `nm --defined-only` 导出 ELF 符号，再以[审计脚本](audit-dual-target-signed-product-link.py)的 `--root <probe> --bundle <bundle> --idf "$IDF_PATH"` 从实际 map、日志和文件输出收据。该脚本若发现主应用混入容量 fixture、构建/验签记录缺失或归档摘要漂移会失败。
+分别在 `source "$IDF_PATH/export.sh"` 后构建；C3 的 `SDKCONFIG_DEFAULTS` 顺序为 Base 共用、`sdkconfig.defaults.esp32c3`、Container C3、仓外 `signed.defaults`，ESP32 换成对应的 target defaults。两者都传 `-DESP_BASE_CONTAINER_BINDING_PROBE=ON`，使用独立 `-B` 与 `-DSDKCONFIG`；ESP32 另传 `-DIDF_TARGET=esp32`，**不传**无签名离线开关。签名配置选择 C3 RSA v2 更新验签、ESP32 ECDSA v1 启动与更新验签，并保留两者的 rollback。通过固定 SDK 的 `espsecure verify-signature` 分别使用 `--version 2` / `--version 1` 校验完整 `.bin`；用目标工具链 `nm --defined-only` 导出 ELF 符号，再以[审计脚本](audit_dual_target_signed_product_link.py)的 `--root <probe> --bundle <bundle> --idf "$IDF_PATH"` 从实际 map、日志和文件输出收据。该脚本若发现主应用混入容量 fixture、构建/验签记录缺失或归档摘要漂移会失败。
 
 所有命令限于仓外 `build`、签名和只读核对；不要将 `idf.py` 提示的 `flash` 命令用于旧板。本次没有生成正式 release、安装业务包或 OTA rollout。
