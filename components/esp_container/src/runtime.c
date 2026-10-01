@@ -57,6 +57,7 @@ struct econtainer_runtime {
     atomic_bool call_active;
     bool guest_active;
     bool entry_expired;
+    bool entry_cancelled;
     uint64_t entry_deadline_us;
     bool stopping;
     bool natives_registered;
@@ -229,6 +230,17 @@ static bool claim_call(econtainer_runtime_t *runtime)
 static bool monotonic_us(uint64_t *result);
 static bool monotonic_ms(uint64_t *result);
 
+static bool cancellation_requested(void *context)
+{
+    econtainer_runtime_t *runtime = context;
+    if (!runtime->stopping && runtime->limits.cancel_requested != NULL &&
+        runtime->limits.cancel_requested(runtime->limits.cancel_context)) {
+        runtime->entry_cancelled = true;
+        return true;
+    }
+    return false;
+}
+
 static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
 {
     econtainer_runtime_t *runtime =
@@ -251,6 +263,10 @@ static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
         runtime->entry_expired = true;
         wasm_runtime_set_exception(runtime->instance,
                                    ECONTAINER_ENTRY_EXPIRED_REASON);
+        return NULL;
+    }
+    if (cancellation_requested(runtime)) {
+        wasm_runtime_set_exception(runtime->instance, "execution cancelled");
         return NULL;
     }
     return runtime;
@@ -602,6 +618,17 @@ static econtainer_runtime_result_t expire_entry(econtainer_runtime_t *runtime,
     return ECONTAINER_RUNTIME_ENTRY_EXPIRED;
 }
 
+static econtainer_runtime_result_t cancel_entry(econtainer_runtime_t *runtime,
+                                                size_t prior_log_size)
+{
+    runtime->entry_cancelled = true;
+    runtime->state = ECONTAINER_RUNTIME_FAILED;
+    runtime->pending_log_size = prior_log_size;
+    for (uint32_t index = 0; index < runtime->limits.max_timers; ++index)
+        runtime->timers[index].active = false;
+    return ECONTAINER_RUNTIME_ENTRY_CANCELLED;
+}
+
 static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
                                           wasm_function_inst_t function,
                                           int32_t budget, uint32_t argc,
@@ -618,19 +645,28 @@ static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
     const size_t prior_log_size = runtime->pending_log_size;
     runtime->entry_deadline_us = began_us + duration_us;
     runtime->entry_expired = false;
+    runtime->entry_cancelled = false;
     wasm_runtime_clear_exception(runtime->instance);
     wasm_runtime_set_instruction_count_limit(runtime->environment, budget);
     wasm_runtime_set_classic_wall_clock_deadline_us(
         runtime->environment, runtime->entry_deadline_us);
+    wasm_runtime_set_classic_cancel_callback(runtime->environment,
+                                             cancellation_requested, runtime);
     runtime->guest_active = true;
     const bool call_ok = wasm_runtime_call_wasm(runtime->environment, function,
                                                 argc, arguments);
     runtime->guest_active = false;
+    wasm_runtime_set_classic_cancel_callback(runtime->environment, NULL, NULL);
     wasm_runtime_set_classic_wall_clock_deadline_us(runtime->environment, 0);
     if (runtime->entry_expired)
         return expire_entry(runtime, prior_log_size);
+    const char *exception = wasm_runtime_get_exception(runtime->instance);
+    if (runtime->entry_cancelled ||
+        (exception != NULL &&
+         strcmp(exception, "Exception: execution cancelled") == 0)) {
+        return cancel_entry(runtime, prior_log_size);
+    }
     if (!call_ok) {
-        const char *exception = wasm_runtime_get_exception(runtime->instance);
         if (exception != NULL &&
             strcmp(exception, "Exception: wall clock deadline exceeded") == 0)
             return expire_entry(runtime, prior_log_size);
@@ -640,7 +676,7 @@ static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
                    ? ECONTAINER_RUNTIME_INSTRUCTION_LIMIT
                    : ECONTAINER_RUNTIME_ENGINE_FAILURE;
     }
-    if (wasm_runtime_get_exception(runtime->instance) != NULL) {
+    if (exception != NULL) {
         runtime->state = ECONTAINER_RUNTIME_FAILED;
         return ECONTAINER_RUNTIME_ENGINE_FAILURE;
     }
@@ -651,6 +687,8 @@ static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
     }
     if (ended_us >= runtime->entry_deadline_us)
         return expire_entry(runtime, prior_log_size);
+    if (cancellation_requested(runtime))
+        return cancel_entry(runtime, prior_log_size);
     *result = (int32_t)arguments[0];
     return ECONTAINER_RUNTIME_OK;
 }
@@ -752,7 +790,9 @@ econtainer_runtime_result_t econtainer_runtime_stop(econtainer_runtime_t *runtim
         atomic_store(&runtime->call_active, false);
         return ECONTAINER_RUNTIME_OK;
     }
-    if (runtime->state != ECONTAINER_RUNTIME_RUNNING) {
+    if (runtime->state != ECONTAINER_RUNTIME_RUNNING &&
+        !(runtime->state == ECONTAINER_RUNTIME_FAILED &&
+          runtime->entry_cancelled)) {
         atomic_store(&runtime->call_active, false);
         return ECONTAINER_RUNTIME_INVALID_STATE;
     }

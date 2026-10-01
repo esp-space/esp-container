@@ -11,6 +11,11 @@ extern "C" {
  * product instance must come from a selected, durable package-slot binding. */
 typedef struct econtainer_runtime econtainer_runtime_t;
 
+/* Queried by the serialized execution owner. The predicate must be bounded,
+ * must not block/reenter the runtime, and its context must remain valid until
+ * product_close. Other threads may only publish into caller-owned atomic state. */
+typedef bool (*econtainer_cancel_query_t)(void *context);
+
 typedef struct {
     uint32_t max_wasm_bytes;
     uint32_t max_memory_pages;
@@ -22,8 +27,13 @@ typedef struct {
     int32_t init_instruction_budget;
     int32_t event_instruction_budget;
     int32_t stop_instruction_budget;
-    /* Bounds accepted results, not synchronous WAMR/SDK return latency. */
+    /* Classic opcode checks are cooperative; native imports/OS scheduling
+     * cannot be preempted. */
     uint32_t max_entry_duration_ms;
+    /* NULL means this owner does not accept asynchronous cancellation. The
+     * predicate aborts init/events; guest stop retains its own budget/deadline. */
+    econtainer_cancel_query_t cancel_requested;
+    void *cancel_context;
 } econtainer_runtime_limits_t;
 
 typedef enum {
@@ -41,6 +51,7 @@ typedef enum {
     ECONTAINER_RUNTIME_NO_TIMER,
     ECONTAINER_RUNTIME_NOT_AUTHORIZED,
     ECONTAINER_RUNTIME_ENTRY_EXPIRED,
+    ECONTAINER_RUNTIME_ENTRY_CANCELLED,
 } econtainer_runtime_result_t;
 
 typedef struct {

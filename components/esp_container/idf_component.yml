@@ -7,4 +7,4 @@ dependencies:
   idf: "==6.1.0"
   wasm-micro-runtime:
     git: "https://github.com/darren-you/wasm-micro-runtime.git"
-    version: "c10736fffdf26d7c2ae234e05aa712df112eb6bf"
+    version: "74fd95ccbdc417c3816e04f3308eea8a5473ed34"

@@ -1,5 +1,7 @@
 # ESP Container
 
+新增[异步取消检查点](docs/operations/async_cancel_checkpoint.md)：公开 WAMR `74fd95cc` 与调用方原子标志使 init／事件长循环在 owner 内协作退出，实际 guest stop 仍受独立指令预算和期限约束。两种分派的 9/9 宿主回归、各 100 次取消／回收和原生资源检查通过；Base 签名包链、固定 SDK 编译及实板仍须分别验证。
+
 新增[消息计数产品样例](examples/message-counter/README.md)：counter v0-2-0 在原 ABI／包格式下提供二进制消息计数、三态与单个 100 ms 定时窗口，声明 timer 能力和零持久数据。公开固定构建器与签名包槽宿主回归可独立执行；保持 Base 现有精确依赖，双板正式安装仍待验收，不扩大平台授权。
 
 `esp-container` 是面向 ESP-IDF 的业务包运行组件。当前提供独立 `esp_container` IDF 组件、受限 Wasm 扫描器、counter guest 的固定 freestanding 构建与静态检查、公开 guest SDK 草案、确定性 ustar 打包与 RSA-3072/PSS 验包工具、浏览器／Node Web Crypto 验包 SDK、只读回调式设备验包及 Wasm ABI/能力检查切片、三槽原始 Flash 存储软件切片、双固件集合对账与联合固件/包切换的单 blob 状态合同、精确分区前置的 ESP-IDF Flash/NVS provider，以及 WAMR Classic 单实例运行切片。三槽候选回读组合签名包、Wasm 与独立产品/配额授权；公开产品生命周期入口仅从实际确认绑定或本 boot 的精确试运行记录装载，组件内部在同一槽锁下重新验包授权、短时映射并完成 WAMR 装载，裸 Wasm 装载仍是私有接口。运行期使用 ABI 2 的页内事件区，保持完整 64 KiB 标准内存边界，并提供逐项授权的单调时间、有界日志和受配额定时器导入。实际专用包分区、完整签名包安装、Base 联合升级与实板容量尚未完成，当前代码只可作为研发检查点。
@@ -54,7 +56,7 @@ flowchart LR
     base["esp-base：设备身份 / 持久授权 / 产品操作装配"]
 ```
 
-IDF 组件物理路径为 `components/esp_container`，其名称与仓库 `esp-container` 属不同命名空间。公开 Git 消费方须把完整提交 SHA 和 `path: components/esp_container` 写入 `idf_component.yml`。WAMR 由该组件的 manifest 固定到[公开维护 fork](docs/design/source-provenance.md) 的完整修复提交；[SDK 锁](components/esp_container/sdk-lock.json)固定公开 ESP-IDF fork `578cf89c343e388db43ba1f4ddcd602fedcb763c` 与 lwIP 源码，组件构建核对锁定组合。组件配置还要求 Classic/Normal loader、指令计量及 Classic 协作式墙钟期限，并拒绝 WAMR 默认开启的 AOT/Fast/WASI/guest pthread/shrunk memory 等特性；消费者按 [C3 样例](examples/c3-runtime/README.md)或 [ESP32 样例](examples/esp32-runtime/README.md)在 `project()` 前设置计量、期限及 bulk/shared/shrunk memory，且在各自 `sdkconfig.defaults` 设置 WAMR Kconfig。两个样例共享同一探针源码，不读取相邻工作区、私有 Tool 或生产凭据。
+IDF 组件物理路径为 `components/esp_container`，其名称与仓库 `esp-container` 属不同命名空间。公开 Git 消费方须把完整提交 SHA 和 `path: components/esp_container` 写入 `idf_component.yml`。WAMR 由该组件的 manifest 固定到[公开维护 fork](docs/design/source-provenance.md) 的完整修复提交；[SDK 锁](components/esp_container/sdk-lock.json)固定公开 ESP-IDF fork `578cf89c343e388db43ba1f4ddcd602fedcb763c` 与 lwIP 源码，组件构建核对锁定组合。组件配置还要求 Classic/Normal loader、指令计量及 Classic 协作式墙钟期限／取消谓词，并拒绝 WAMR 默认开启的 AOT/Fast/WASI/guest pthread/shrunk memory 等特性；消费者按 [C3 样例](examples/c3-runtime/README.md)或 [ESP32 样例](examples/esp32-runtime/README.md)在 `project()` 前设置计量、期限及 bulk/shared/shrunk memory，且在各自 `sdkconfig.defaults` 设置 WAMR Kconfig。两个样例共享同一探针源码，不读取相邻工作区、私有 Tool 或生产凭据。
 
 ## 本机验证
 

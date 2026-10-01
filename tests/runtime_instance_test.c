@@ -2,6 +2,8 @@
 #include "esp_container.h"
 
 #include <stdbool.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -387,6 +389,171 @@ static bool test_pure_guest_deadline(const char *path, const char *counter_path,
     CHECK(econtainer_runtime_stop(runtime) == ECONTAINER_RUNTIME_OK);
     CHECK(econtainer_runtime_close(&runtime) == ECONTAINER_RUNTIME_OK &&
           runtime == NULL);
+    return true;
+}
+
+typedef struct {
+    atomic_bool entered;
+    atomic_bool requested;
+    uint64_t requested_us;
+} cancellation_test_t;
+
+static uint64_t test_monotonic_us(void)
+{
+    struct timespec now = {0};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+    return (uint64_t)now.tv_sec * UINT64_C(1000000) +
+           (uint64_t)now.tv_nsec / UINT64_C(1000);
+}
+
+static bool test_cancel_requested(void *context)
+{
+    cancellation_test_t *cancel = context;
+    atomic_store_explicit(&cancel->entered, true, memory_order_release);
+    return atomic_load_explicit(&cancel->requested, memory_order_acquire);
+}
+
+static void *request_cancellation(void *context)
+{
+    cancellation_test_t *cancel = context;
+    const uint64_t began_us = test_monotonic_us();
+    const struct timespec poll = {.tv_nsec = 1000000};
+    while (!atomic_load_explicit(&cancel->entered, memory_order_acquire) &&
+           test_monotonic_us() - began_us < UINT64_C(500000))
+        nanosleep(&poll, NULL);
+    const struct timespec delay = {.tv_nsec = 10000000};
+    nanosleep(&delay, NULL);
+    cancel->requested_us = test_monotonic_us();
+    atomic_store_explicit(&cancel->requested, true, memory_order_release);
+    return NULL;
+}
+
+static bool test_async_cancellation(const char *path, unsigned entry,
+                                     bool imports)
+{
+    size_t length = 0;
+    uint8_t *bytes = read_file(path, &length);
+    CHECK(bytes != NULL);
+    cancellation_test_t cancel = {0};
+    atomic_init(&cancel.entered, false);
+    atomic_init(&cancel.requested, false);
+    econtainer_runtime_limits_t cancellable = limits;
+    cancellable.init_instruction_budget = INT32_MAX;
+    cancellable.event_instruction_budget = INT32_MAX;
+    cancellable.max_entry_duration_ms = 500;
+    cancellable.cancel_requested = test_cancel_requested;
+    cancellable.cancel_context = &cancel;
+    if (imports) {
+        cancellable.allowed_capabilities = ECONTAINER_CAP_MONOTONIC_TIME |
+                                            ECONTAINER_CAP_LOG | ECONTAINER_CAP_TIMER;
+        cancellable.max_log_bytes = 16;
+        cancellable.max_timers = 1;
+    }
+    econtainer_runtime_t *runtime = NULL;
+    CHECK(econtainer_runtime_open(bytes, length, &cancellable, &runtime) ==
+          ECONTAINER_RUNTIME_OK);
+    free(bytes);
+    int32_t result = 123;
+    if (entry != 0) {
+        CHECK(econtainer_runtime_init(runtime) == ECONTAINER_RUNTIME_OK);
+        if (imports) {
+            const uint8_t timer[] = {'T'}, prior[] = {'P'};
+            CHECK(econtainer_runtime_on_event(runtime, timer, sizeof timer, &result) ==
+                  ECONTAINER_RUNTIME_OK);
+            CHECK(econtainer_runtime_on_event(runtime, prior, sizeof prior, &result) ==
+                  ECONTAINER_RUNTIME_OK);
+        }
+    }
+    atomic_store_explicit(&cancel.entered, false, memory_order_release);
+    pthread_t requester;
+    CHECK(pthread_create(&requester, NULL, request_cancellation, &cancel) == 0);
+    const uint8_t event[] = {imports ? 'R' : 1};
+    result = 123;
+    const econtainer_runtime_result_t status = entry == 0
+        ? econtainer_runtime_init(runtime)
+        : econtainer_runtime_on_event(runtime, event, sizeof event, &result);
+    const uint64_t returned_us = test_monotonic_us();
+    CHECK(pthread_join(requester, NULL) == 0);
+    CHECK(status == ECONTAINER_RUNTIME_ENTRY_CANCELLED);
+    CHECK(cancel.requested_us > 0 && returned_us >= cancel.requested_us &&
+          returned_us - cancel.requested_us < UINT64_C(250000));
+    CHECK(result == 123);
+    CHECK(econtainer_runtime_state(runtime) == ECONTAINER_RUNTIME_FAILED);
+    CHECK(econtainer_runtime_on_event(runtime, event, sizeof event, &result) ==
+          ECONTAINER_RUNTIME_INVALID_STATE);
+    if (imports) {
+        uint8_t log[16] = {0};
+        size_t log_size = 99;
+        CHECK(econtainer_runtime_take_log(runtime, log, sizeof log, &log_size) ==
+              ECONTAINER_RUNTIME_OK && log_size == 5 &&
+              memcmp(log, "prior", log_size) == 0);
+        uint64_t deadline_ms = 99;
+        econtainer_timer_event_t timer_event = {0};
+        CHECK(econtainer_runtime_next_timer_deadline(runtime, &deadline_ms) ==
+              ECONTAINER_RUNTIME_INVALID_STATE);
+        CHECK(econtainer_runtime_poll_timer(runtime, &timer_event, &result) ==
+              ECONTAINER_RUNTIME_INVALID_STATE);
+    }
+    /* A request still set must not bypass the actual guest stop. */
+    CHECK(econtainer_runtime_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    CHECK(econtainer_runtime_state(runtime) == ECONTAINER_RUNTIME_STOPPED);
+    CHECK(econtainer_runtime_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+    fprintf(stderr, "async cancel entry=%u imports=%u latency_us=%llu\n",
+            entry, imports, (unsigned long long)(returned_us - cancel.requested_us));
+    return true;
+}
+
+static bool test_repeated_cancel_release(const char *path)
+{
+#ifdef ECONTAINER_TEST_RESOURCE_STATS
+    resource_stats_t after_ten = {0}, after_fifty = {0}, after_hundred = {0};
+#endif
+    for (unsigned cycle = 1; cycle <= 100; ++cycle) {
+        CHECK(test_async_cancellation(path, 1, false));
+#ifdef ECONTAINER_TEST_RESOURCE_STATS
+        if (cycle == 10) CHECK(sample_resources(&after_ten));
+        if (cycle == 50) CHECK(sample_resources(&after_fifty));
+        if (cycle == 100) CHECK(sample_resources(&after_hundred));
+#endif
+    }
+#ifdef ECONTAINER_TEST_RESOURCE_STATS
+    CHECK(resources_stable("cancel", after_ten, after_fifty, after_hundred));
+#endif
+    return true;
+}
+
+static bool test_cancel_stop_failures(const char *loop_path, const char *fail_path)
+{
+    cancellation_test_t cancel = {0};
+    atomic_init(&cancel.entered, false);
+    atomic_init(&cancel.requested, false);
+    econtainer_runtime_limits_t cancellable = limits;
+    cancellable.cancel_requested = test_cancel_requested;
+    cancellable.cancel_context = &cancel;
+    cancellable.stop_instruction_budget = INT32_MAX;
+    cancellable.max_entry_duration_ms = 20;
+    const char *paths[] = {loop_path, fail_path};
+    for (size_t index = 0; index < 2; ++index) {
+        size_t length = 0;
+        uint8_t *bytes = read_file(paths[index], &length);
+        CHECK(bytes != NULL);
+        econtainer_runtime_t *runtime = NULL;
+        atomic_store(&cancel.requested, false);
+        CHECK(econtainer_runtime_open(bytes, length, &cancellable, &runtime) ==
+              ECONTAINER_RUNTIME_OK);
+        free(bytes);
+        CHECK(econtainer_runtime_init(runtime) == ECONTAINER_RUNTIME_OK);
+        atomic_store(&cancel.requested, true);
+        int32_t result = 123;
+        const uint8_t event[] = {1};
+        CHECK(econtainer_runtime_on_event(runtime, event, sizeof event, &result) ==
+              ECONTAINER_RUNTIME_ENTRY_CANCELLED && result == 123);
+        CHECK(econtainer_runtime_stop(runtime) == (index == 0
+              ? ECONTAINER_RUNTIME_ENTRY_EXPIRED : ECONTAINER_RUNTIME_GUEST_FAILURE));
+        CHECK(econtainer_runtime_state(runtime) == ECONTAINER_RUNTIME_FAILED);
+        CHECK(econtainer_runtime_stop(runtime) == ECONTAINER_RUNTIME_INVALID_STATE);
+        CHECK(econtainer_runtime_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+    }
     return true;
 }
 
@@ -1047,6 +1214,11 @@ int main(int argc, char **argv)
                         test_pure_guest_deadline(argv[3], argv[1], 0) &&
                         test_pure_guest_deadline(argv[4], argv[1], 1) &&
                         test_pure_guest_deadline(argv[5], argv[1], 2) &&
+                        test_async_cancellation(argv[3], 0, false) &&
+                        test_async_cancellation(argv[4], 1, false) &&
+                        test_async_cancellation(argv[10], 1, true) &&
+                        test_repeated_cancel_release(argv[4]) &&
+                        test_cancel_stop_failures(argv[5], argv[6]) &&
                         test_wrong_abi_and_release(argv[7], argv[1], argv[11]) &&
                         test_repeated_release(argv[1]) &&
                         test_failure_reopen(argv[1], argv[3], argv[4], argv[5], argv[6]) &&
