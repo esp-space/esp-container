@@ -126,4 +126,4 @@ host 工具的包格式和使用步骤见 [包工具](tools/README.md)。[只读
 - [ESP32-D0WD-V3 原型](examples/esp32-runtime/README.md)
 - [双目标共用运行探针](examples/runtime-probe/README.md)
 - [测试](tests/README.md)
-- [嵌入式工程标准](https://github.com/darren-you/darren-space/blob/master/harness/docs/workspace/standards/embedded_firmware/embedded_firmware_golden_path.md)
+- [嵌入式工程标准](https://github.com/darren-you/darren-space/blob/master/harness/docs/workspace/standards/embedded-firmware/embedded_firmware_golden_path.md)

@@ -1,5 +1,11 @@
 # 开发检查点
 
+## 2026-10-01 来源身份整合
+
+隔离产品链候选整合源仓 `81b3a427d569de1bdb0451a0810540cac1739b34` 的仓库身份修改。ESP-IDF／lwIP 来源 URL 对齐 `esp-space`，精确源码仍为 `578cf89c343e388db43ba1f4ddcd602fedcb763c`／`2758df4cd3666b3b2a5b53830148379326425c0d`；WAMR 继续使用候选已验证的 `c10736fffdf26d7c2ae234e05aa712df112eb6bf`，没有回退到源仓旧文档的版本。
+
+全部非文档执行输入（排除仅来源 URL 变化的 SDK 锁与仓库元数据）逐项与整合前候选核对，Git blob 及子模块指针均相同；两个样例锁与组件声明仍固定上述 WAMR。此次没有改运行源码、重新刷板或发布，既有运行及容量证据的范围不扩大。
+
 ## 2026-09-30 Go 规范清单持久化接口
 
 Go SDK 新增 `EncodeManifest`／`DecodeManifest`，沿用唯一 v1 schema、规范 JSON、完整版本与 4096 字节上限，服务已验签元数据的登记及回读。接口只处理清单，不验签、不执行 guest、不授予权限；调用方的登记工厂仍须先 `Verify` 完整原始包。
@@ -75,7 +81,7 @@ UART0 原始日志记录 `before free/largest=294688/163840`、正常 `run call_
 | --- | --- | --- |
 | `python3 -m unittest discover -s tests -v` | 9 项通过 | 主机 RSA-3072/PSS、规范 JSON、受限 ustar、Wasm 初筛；测试键仅在临时目录产生 |
 | CMake/CTest `wasm_scan` | 1 项通过 | 初始无 import/no start 扫描，不是完整 guest ABI 或设备验包 |
-| `darren-you/esp-container` 公开 `master` 独立 checkout | 从首个第一方提交 `756244f18d66115eb17524707bf558063ef8216f` 重新拉取，Python 9 项与 CTest 1 项均通过 | 只证明公开仓主机工具可复现；不代表设备运行链路 |
+| `esp-space/esp-container` 公开 `master` 独立 checkout | 从首个第一方提交 `756244f18d66115eb17524707bf558063ef8216f` 重新拉取，Python 9 项与 CTest 1 项均通过 | 只证明公开仓主机工具可复现；不代表设备运行链路 |
 | 固定 IDF `fff9895c82d744c7237be8847347bdd1b07c6643` + lwIP `2758df4cd3666b3b2a5b53830148379326425c0d` 构建 `examples/c3-runtime` | 原样官方 WAMR `8c18e3f68b16c4bcaf05996b2636f6ed2b4cf629` 失败 | 编译 `espidf_platform.c`、`espidf_file.c` 缺 POSIX stat 类型，以及 `espidf_memmap.c` 引用当前 C3 内存保护下不存在的 `MALLOC_CAP_EXEC`；这是修复前的失败基线 |
 | 公开 WAMR fork `a34d721b630213f59fde0b40cebbb980903660e8` + 当前 `esp-container` 组件清单与锁 | 固定 IDF/C3 全部编译链接通过；bin 227168 字节，SHA-256 `092e3fc1d1df33e3c98859e34167098ddeb4815d19148ff117fbd758e9b8975f` | 锁文件精确指向公开 fork；`CONFIG_ESP_SYSTEM_MEMPROT=y`，35 个 WAMR 编译单元不含 `espidf_file.c`，计量与 Classic 编译标志已核对；未刷板、尚无实际运行/预算异常或堆峰值 |
 | 精确 WAMR fork 的主机 Classic 执行与 C3 探针异常判定收紧 | 锁文件 WAMR `a34d721...`、`.component_hash=e7a23b...` 一致；主机 CTest 2/2 通过，正常函数 `call_ok=1/result=0`，死循环 `call_ok=0/Exception: instruction limit exceeded`；固定 SDK/C3 重新完整链接，bin 227232 字节，SHA-256 `b78ce257e17ef505a20c8c8b0f2af550ca3e1fa897494faabab5dabd5b55b8e1` | 这是本机真实解释器执行与 C3 构建证据；尚未刷板，不能声称 C3 实际执行、堆峰值或全负载预算通过 |

@@ -21,7 +21,7 @@ doc_status:
   api: present
   release: missing
 github:
-  repo: darren-you/esp-container
+  repo: esp-space/esp-container
   visibility: public
   about: 面向 ESP-IDF 的受控 Wasm 业务包运行组件、公开 guest SDK 与签名打包工具
   topics:
