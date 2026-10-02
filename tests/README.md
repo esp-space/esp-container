@@ -1,6 +1,6 @@
 # 测试入口
 
-`runtime_instance` 使用真正的宿主请求线程和 owner 原子谓词，验证 init／事件长循环取消、保留既有日志并丢弃取消入口新日志、定时器取消、实际 guest stop 和停止失败阻断；另有 100 次取消／关闭／重开及 10/50/100 次原生资源采样。goto／switch 分派和 ASan/UBSan 结果见[异步取消检查点](../docs/operations/async_cancel_checkpoint.md)。
+`runtime_instance` 使用真正的宿主请求线程和 owner 原子谓词，验证 init／事件长循环取消、保留既有日志并丢弃取消入口新日志、定时器取消、实际 guest stop 和停止失败阻断；另有 100 次取消／关闭／重开及 10/50/100 次原生资源采样。goto／switch 分派和 ASan/UBSan 结果见[异步取消检查点](../docs/operations/async-cancel-checkpoint.md)。
 
 `slot_runtime` 新增真实签名[消息计数产品](../examples/message-counter/README.md)，使用原公开 product API 与一个 timer 配额验证消息／三态／真实到期／停止取消、同 boot 重开归零和旧确认包恢复。清单声明零持久数据；Flash/NVS、固件集合与健康仍为宿主夹具，未走 Base 公开网络安装或设备健康确认。
 

@@ -1,6 +1,6 @@
 # ESP Container
 
-新增[异步取消检查点](docs/operations/async_cancel_checkpoint.md)：公开 WAMR `74fd95cc` 与调用方原子标志使 init／事件长循环在 owner 内协作退出，实际 guest stop 仍受独立指令预算和期限约束。两种分派的 9/9 宿主回归、各 100 次取消／回收和原生资源检查通过；Base 签名包链、固定 SDK 编译及实板仍须分别验证。
+新增[异步取消检查点](docs/operations/async-cancel-checkpoint.md)：公开 WAMR `74fd95cc` 与调用方原子标志使 init／事件长循环在 owner 内协作退出，实际 guest stop 仍受独立指令预算和期限约束。两种分派的 9/9 宿主回归、各 100 次取消／回收和原生资源检查通过；Base 签名包链、固定 SDK 编译及实板仍须分别验证。
 
 新增[消息计数产品样例](examples/message-counter/README.md)：counter v0-2-0 在原 ABI／包格式下提供二进制消息计数、三态与单个 100 ms 定时窗口，声明 timer 能力和零持久数据。公开固定构建器与签名包槽宿主回归可独立执行；保持 Base 现有精确依赖，双板正式安装仍待验收，不扩大平台授权。
 
@@ -128,4 +128,4 @@ host 工具的包格式和使用步骤见 [包工具](tools/README.md)。[只读
 - [ESP32-D0WD-V3 原型](examples/esp32-runtime/README.md)
 - [双目标共用运行探针](examples/runtime-probe/README.md)
 - [测试](tests/README.md)
-- [嵌入式工程标准](https://github.com/darren-you/darren-space/blob/master/harness/docs/workspace/standards/embedded-firmware/embedded_firmware_golden_path.md)
+- [嵌入式工程标准](https://github.com/darren-you/darren-space/blob/master/harness/docs/workspace/standards/embedded-firmware/embedded-firmware-golden-path.md)
