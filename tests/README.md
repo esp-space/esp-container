@@ -1,5 +1,7 @@
 # 测试入口
 
+`slot_runtime` 与 `host_call_timeout` 使用真实零导入 counter Wasm、但签名清单声明必需 timer 的包，覆盖 trial／confirmed 装载。验包授权允许 timer、独立 runtime grant 为零时，公开入口须返回 slots OK／runtime NOT_AUTHORIZED、空实例及全部零元数据，且完成映射释放和解锁；完整授权可实际 init／event／stop／close。原有验证层拒绝、真实 timer 导入和无额外授予的运行限制仍走同一回归入口。
+
 `package_slot` 使用真实 RSA-PSS 包验证同产品同版本异整包 SHA 拒绝，包括同清单随机重签、当前及回退引用、损坏引用／读取失败、同 SHA 持久元数据不符；合法不同版本、另一产品和旧回退 ABI 保持原合同。2049 字节版本覆盖完整相同、共同前缀尾部不同与长短不同，读块不超过 512 字节。同 SHA 引用不再额外整包验签。`slot_runtime` 与 `host_call_timeout` 还从公开产品 API 拒绝仍保留的冲突／损坏回退包，检查失败元数据清零、映射收敛；固件 REUSE 退役该回退绑定后，同一当前包可实际初始化、停止并关闭。不同代码的旧配额夹具现在声明各自版本，避免与本轮身份合同冲突；旧 Timeout 不是配额通过证据。
 
 `host_call_timeout` 复用 `slot_runtime` 的真实签名包、公开产品 API、假 Flash/NVS 与锁定 WAMR。仅独立测试库把实际 `runtime.c` 的 POSIX 时钟符号接到确定性夹具；WAMR 平台时钟和生产运行配置不变。它验证签名 100 ms 与平台 500 ms/20 ms 的双向交集，四种导入的成功、非法参数、日志 busy 和 timer 满槽返回，四个各自合法短调用的总耗时超过 100 ms 仍成功，以及 init/stop、既有引擎异常、入口超期、取消优先级和时钟失败/回退/加法溢出。超期不交付 guest 结果；旧日志保留、新日志丢弃，失败实例拒绝 timer 投递，关闭重开无旧资源。加法溢出夹具只证明软件边界，准备阶段使用未来时钟偏移避免真实解释器期限抢先，不是宿主或实板墙钟测量。

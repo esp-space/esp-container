@@ -784,10 +784,86 @@ static void run_retained_reference_identity(const file_t *key, const file_t *cur
     free(fixture);
 }
 
+static bool run_required_runtime_grant(const file_t *key, const file_t *package)
+{
+    fixture_t *fixture = malloc(sizeof(*fixture));
+    assert(fixture != NULL);
+    initialize(fixture, key);
+    prepare(fixture, package);
+    begin_trial(fixture);
+    bool passed = true;
+    for (unsigned selection = 0; selection < 2; ++selection) {
+        const econtainer_slot_selection_request_t request = request_for(fixture, selection == 0);
+        fixture->limits.allowed_capabilities = 0;
+        fixture->limits.max_log_bytes = 0;
+        fixture->limits.max_timers = 0;
+        econtainer_runtime_t *runtime = NULL;
+        const unsigned before_map = fixture->store.mapped;
+        const econtainer_slot_runtime_result_t rejected = open_request(fixture, &request, &runtime);
+        const uint8_t empty_digest[32] = {0};
+        const bool metadata_zero = rejected.event_queue_limit == 0U &&
+            memcmp(rejected.package_sha256, empty_digest, sizeof empty_digest) == 0 &&
+            rejected.product_id_offset_bytes == 0U && rejected.product_id_size_bytes == 0U &&
+            rejected.product_version_offset_bytes == 0U && rejected.product_version_size_bytes == 0U &&
+            rejected.guest_abi_version == 0U && rejected.data_schema_version == 0U;
+        const bool released = !fixture->store.locked && fixture->store.mapping == NULL &&
+            fixture->store.mapped == before_map + 1U &&
+            fixture->store.mapped == fixture->store.unmapped;
+        const bool denied = rejected.slots == ECONTAINER_SLOTS_OK &&
+            rejected.runtime == ECONTAINER_RUNTIME_NOT_AUTHORIZED && runtime == NULL &&
+            metadata_zero && released;
+        printf("required_runtime_grant: selection=%s slots=%d runtime=%d out_null=%u metadata_zero=%u mapping_released=%u\n",
+            selection == 0 ? "trial" : "confirmed", (int)rejected.slots,
+            (int)rejected.runtime, (unsigned)(runtime == NULL),
+            (unsigned)metadata_zero, (unsigned)released);
+        if (!denied) {
+            /* Red evidence exits normally after closing the unexpectedly live
+             * instance; it must not leave a runtime claim or mapping behind. */
+            if (runtime != NULL) {
+                const econtainer_runtime_result_t initialized = econtainer_product_init(runtime);
+                printf("required_runtime_grant: unexpected_init=%d close=%d\n", (int)initialized,
+                    (int)econtainer_product_close(&runtime));
+                assert(runtime == NULL);
+            }
+            passed = false;
+            break;
+        }
+        fixture->limits.allowed_capabilities = ECONTAINER_CAP_ALL;
+        fixture->limits.max_log_bytes = 16;
+        fixture->limits.max_timers = 1;
+        econtainer_slot_runtime_result_t accepted = open_request(fixture, &request, &runtime);
+        assert(accepted.slots == ECONTAINER_SLOTS_OK && accepted.runtime == ECONTAINER_RUNTIME_OK && runtime != NULL);
+        assert(accepted.event_queue_limit == 8U && accepted.product_id_size_bytes == 7U &&
+               accepted.product_version_size_bytes == 19U && accepted.guest_abi_version == 2U &&
+               accepted.data_schema_version == 1U);
+        assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
+        const uint8_t event[] = {1, 2, 3};
+        int32_t guest_result = -1;
+        assert(econtainer_product_on_event(runtime, event, sizeof event, &guest_result) == ECONTAINER_RUNTIME_OK && guest_result == 3);
+        assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+        assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+        assert(!fixture->store.locked && fixture->store.mapping == NULL &&
+               fixture->store.mapped == fixture->store.unmapped);
+        if (selection == 0) confirm(fixture);
+    }
+    assert(pthread_cond_destroy(&fixture->store.condition) == 0);
+    assert(pthread_mutex_destroy(&fixture->store.gate) == 0);
+    assert(pthread_mutex_destroy(&fixture->store.lock) == 0);
+    free(fixture);
+    return passed;
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
     file_t key = read_file(argv[1], "public.der");
+    file_t required_timer = read_file(argv[1], "required-timer.pkg");
+    const bool required_grant_passed = run_required_runtime_grant(&key, &required_timer);
+    free(required_timer.bytes);
+    if (!required_grant_passed) {
+        free(key.bytes);
+        return 1;
+    }
     const char *names[] = {"p0.pkg", "p1.pkg", "p2.pkg", "p3.pkg",
                            "host.pkg", "budget.pkg", "stack.pkg", "bad-loader.pkg",
                            "timer.pkg", "message-counter.pkg"};

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from package_wasm_test import signed_package
+import counter_guest
 
 
 def main() -> None:
@@ -20,6 +22,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     spec = json.loads((root / "examples/counter/spec.example.json").read_text())
     counter = (guests / "counter.wasm").read_bytes()
+    counter_guest.check_wasm(counter)  # Its restricted profile forbids imports.
     counter_v2 = (guests / "counter-v2.wasm").read_bytes()
     with tempfile.TemporaryDirectory() as directory:
         temporary = Path(directory)
@@ -37,6 +40,15 @@ def main() -> None:
             (temporary / f"p{index}.pkg").write_bytes(signed_package(private, wasm, current))
         # Same public manifest/Wasm, fresh randomized PSS => a distinct package.
         (temporary / "identity.pkg").write_bytes(signed_package(private, counter, spec))
+        # The real counter has no imports. A signed required capability still
+        # needs the independent runtime grant even when this Wasm never uses it.
+        current = copy.deepcopy(spec)
+        current["required_capabilities"] = ["timer"]
+        current["product_version"] = "v0-9-required-timer"
+        required_timer = signed_package(private, counter, current)
+        (temporary / "required-timer.pkg").write_bytes(required_timer)
+        print("required_timer_fixture: wasm_sha256=" + hashlib.sha256(counter).hexdigest()
+              + " package_sha256=" + hashlib.sha256(required_timer).hexdigest(), flush=True)
         for name, field, limit in (("budget", "instruction_budget", 1),
                                    ("stack", "stack_limit_bytes", 8)):
             current = copy.deepcopy(spec)

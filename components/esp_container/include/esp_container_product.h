@@ -111,8 +111,11 @@ typedef struct {
  * The implementation rechecks the selected Flash bytes, signature, product,
  * ABI and independent grants under the slot lock. It releases the temporary
  * mapping before returning. validation workspaces are caller-owned for this
- * synchronous call; verified_info is ignored. Signed limits are intersected
- * with the independent runtime_limits. out must point to NULL.
+ * synchronous call; verified_info is ignored. Every signed required capability
+ * must be allowed by both independent grants, even if unused by Wasm imports.
+ * A narrower runtime capability grant returns slots OK / runtime NOT_AUTHORIZED
+ * with NULL out and zero metadata. Signed resource limits are intersected with
+ * the independent runtime_limits. out must point to NULL.
  * On ESP-IDF the unique executor owner must be a pthread_create thread. A
  * successful result also returns the reverified signed queue limit and package
  * digest and manifest identifier slices/ABI/schema, so the caller need not

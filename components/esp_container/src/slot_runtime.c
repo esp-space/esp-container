@@ -65,6 +65,10 @@ static econtainer_slots_result_t open_selected(void *context,
         } else if (info.wasm_offset_bytes > reader.size_bytes ||
                    info.wasm_size_bytes > reader.size_bytes - info.wasm_offset_bytes) {
             result = ECONTAINER_SLOTS_UNTRUSTED;
+        } else if ((info.requested_capabilities &
+                    ~open->platform_limits->allowed_capabilities) != 0U) {
+            open->runtime_result = ECONTAINER_RUNTIME_NOT_AUTHORIZED;
+            result = ECONTAINER_SLOTS_OK;
         } else {
             econtainer_runtime_limits_t limits = *open->platform_limits;
             limits.max_wasm_bytes = minimum(limits.max_wasm_bytes,

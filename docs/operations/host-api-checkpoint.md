@@ -1,5 +1,13 @@
 # 宿主导入检查点
 
+## P6-04 必需能力与独立运行授权（2026-10-04）
+
+公开产品装载现在在选中包重新验签及验证层授权通过后，检查签名清单的完整 `required_capabilities` 是否也被独立 `runtime_limits.allowed_capabilities` 允许。即使当前 Wasm 没有导入该能力，缺少必需权限仍返回 `slots=OK/runtime=NOT_AUTHORIZED`，实例为空、全部装载元数据为零；保持原映射解除与槽锁释放，并且不调用 WAMR 装载或取得全局实例占用。验证层授权失败仍返回 `UNTRUSTED`。完整授权后的交集限制保持，平台不能给包未声明的能力。
+
+真实 RSA-3072/PSS 测试包使用零导入 counter、清单必需 timer。旧生产代码实际返回 slots/runtime 均 OK，实例 init 成功，回归关闭意外实例后正常退出 1；配置及编译均退出 0，未用断言中止或 Timeout 充当行为红。修复后 trial／confirmed 均拒绝更窄运行授权，核对全部零元数据、映射计数与解锁；完整授权可实际 init／event／stop／close，随后仍可重开。原真实 timer、验证层拒绝、配额和身份矩阵继续执行。
+
+普通构建、ASan/UBSan goto 与 switch 三配置的 `runtime_instance`、`slot_runtime`、`host_call_timeout` 各 **3/3**，实际配置／构建／测试命令均退出 0；sanitizer 使用 `detect_leaks=0:abort_on_error=1` 与 `halt_on_error=1:print_stacktrace=1`，没有声明泄漏检测通过或其他七项当前通过。实际编译输入与最终源码逐项核对；初始仓外测试快照刻意未复制无关 Go/JS 和记录文件，后续仅补齐当前原件，原快照及补全时点分别保存。生产变化只有该四行拒绝分支，没有新增字段、分配、包格式或授权范围。该软件回归不证明 MCU 容量、native 期限、实际 Flash/NVS、生产信任锚或双板验收；Base 的精确消费和 SDK 构建需独立验证。
+
 ## P6-07 签名单次宿主期限接线（2026-10-04）
 
 公开 `econtainer_runtime_limits_t` 现在要求正数 `max_host_call_timeout_ms`，所有调用方必须显式装配。`econtainer_product_open` 在同一槽锁内重新验签后，将该平台值与本次真实清单的 `host_call_timeout_ms` 取最小值；独立的 `max_entry_duration_ms` 保持原值。签名不能放宽平台授权，也不能把单次宿主期限换成整个 guest 入口额度。
