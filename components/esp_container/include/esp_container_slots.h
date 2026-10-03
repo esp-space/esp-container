@@ -138,6 +138,16 @@ typedef bool (*econtainer_slot_read_fn)(void *context, size_t relative_offset_by
                                          uint8_t *destination, size_t size_bytes);
 typedef bool (*econtainer_slot_source_fn)(void *context, size_t relative_offset_bytes,
                                            uint8_t *destination, size_t size_bytes);
+/* Borrowed exact durable bindings under the existing slot lock. The reader
+ * permits only package-present binding indexes, nonzero reads <=512 bytes,
+ * and offsets inside that binding's package. Do not retain or reenter. */
+typedef struct {
+    const econtainer_slot_binding_t *bindings;
+    bool (*read)(void *context, unsigned binding_index, size_t relative_offset_bytes,
+                 uint8_t *destination, size_t size_bytes);
+    void *context;
+} econtainer_slot_references_t;
+
 typedef enum {
     ECONTAINER_SLOT_VALIDATION_OK = 0,
     ECONTAINER_SLOT_VALIDATION_UNTRUSTED,
@@ -151,13 +161,15 @@ typedef enum {
  */
 typedef econtainer_slot_validation_result_t (*econtainer_slot_validate_fn)(
     void *context, const econtainer_slot_operation_t *operation,
-    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes);
+    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes,
+    const econtainer_slot_references_t *references);
 
 /* For a firmware transition that reuses an already confirmed package. The
  * platform supplies the proposed firmware's independent product/grant policy. */
 typedef econtainer_slot_validation_result_t (*econtainer_slot_validate_binding_fn)(
     void *context, const econtainer_slot_binding_t *binding,
-    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes);
+    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes,
+    const econtainer_slot_references_t *references);
 
 /* The unique executor owner checks that this trial has stopped and has no native references. */
 typedef bool (*econtainer_slot_trial_stopped_fn)(

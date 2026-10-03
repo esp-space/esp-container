@@ -16,8 +16,10 @@ typedef struct {
     size_t read_count;
     size_t fail_after_read_count;
     size_t largest_read;
+    size_t reference_verifier_reads;
     unsigned wasm_offset_read_count;
     bool fail_wasm_scan_read;
+    bool fail_reference_validator;
 } fake_store_t;
 
 typedef struct {
@@ -84,10 +86,12 @@ static bool fake_flash_read(void *context, uint32_t offset,
     fake_store_t *store = context;
     assert(store->locked);
     ++store->read_count;
+    if (offset == FLASH_BASE && length == 512U) ++store->reference_verifier_reads;
     if (offset == FLASH_BASE + 3072U) {
         ++store->wasm_offset_read_count;
     }
-    if (!flash_bounds(offset, length) ||
+    if ((store->fail_reference_validator && offset == FLASH_BASE && length == 512U) ||
+        !flash_bounds(offset, length) ||
         (store->fail_wasm_scan_read && offset == FLASH_BASE + 3072U &&
          store->wasm_offset_read_count == 3U) ||
         (store->fail_after_read_count != 0 &&
@@ -145,7 +149,7 @@ static bool read_file(const char *path, uint8_t **bytes, size_t *length)
 
 int main(int argc, char **argv)
 {
-    if (argc != 4) return 3;
+    if (argc != 4 && argc != 5) return 3;
     uint8_t *package = NULL;
     uint8_t *key = NULL;
     size_t package_size = 0;
@@ -168,6 +172,48 @@ int main(int argc, char **argv)
     econtainer_slot_binding_t bindings[ECONTAINER_SLOT_BINDING_COUNT] = {0};
     bindings[0].present = true;
     memset(bindings[0].firmware_sha256, 0x11, 32);
+    uint8_t *reference = NULL;
+    size_t reference_size = 0;
+    const bool retired_test = strncmp(argv[3], "retired-", 8U) == 0;
+    const bool identity_test = strncmp(argv[3], "identity-", 9U) == 0;
+    if (identity_test) {
+        assert(argc == 5 && read_file(argv[4], &reference, &reference_size));
+        assert(reference_size <= SLOT_BYTES);
+        const unsigned binding = (strstr(argv[3], "rollback") != NULL || strcmp(argv[3], "identity-same-sha-schema-conflict") == 0) ? 1U : 0U;
+        if (binding == 1U) {
+            firmware_set.bootable_count = 2U;
+            memset(firmware_set.bootable_firmware_sha256[1], 0x22, 32);
+            bindings[1].present = true;
+            memset(bindings[1].firmware_sha256, 0x22, 32);
+        }
+        bindings[binding].package_present = true;
+        bindings[binding].slot = 0U;
+        bindings[binding].package_size_bytes = (uint32_t)reference_size;
+        bindings[binding].guest_abi_version = strstr(argv[3], "old-abi") != NULL ? 3U : 2U;
+        bindings[binding].data_schema_version = strcmp(argv[3], "identity-same-sha-schema-conflict") == 0 ? 2U : 1U;
+        assert(SHA256(reference, reference_size, bindings[binding].package_sha256));
+        memcpy(store->flash, reference, reference_size);
+    }
+    if (retired_test) {
+        assert(argc == 5 && read_file(argv[4], &reference, &reference_size));
+        assert(reference_size <= SLOT_BYTES);
+        firmware_set.bootable_count = 2U;
+        memset(firmware_set.bootable_firmware_sha256[1], 0x22, 32);
+        for (unsigned index = 0; index < 2U; ++index) {
+            const uint8_t *bytes = index == 0U ? package : reference;
+            const size_t size = index == 0U ? package_size : reference_size;
+            bindings[index].present = true;
+            bindings[index].package_present = true;
+            bindings[index].slot = (uint8_t)index;
+            memcpy(bindings[index].firmware_sha256,
+                   firmware_set.bootable_firmware_sha256[index], 32U);
+            bindings[index].package_size_bytes = (uint32_t)size;
+            bindings[index].guest_abi_version = 2U;
+            bindings[index].data_schema_version = 1U;
+            assert(SHA256(bytes, size, bindings[index].package_sha256));
+            memcpy(store->flash + index * SLOT_BYTES, bytes, size);
+        }
+    }
     assert(econtainer_slots_initialize(&io, &geometry, &firmware_set, bindings) ==
            ECONTAINER_SLOTS_OK);
 
@@ -181,12 +227,6 @@ int main(int argc, char **argv)
     if (strcmp(argv[3], "schema") == 0) operation.data_schema_version = 2;
 
     econtainer_slots_state_t state;
-    assert(econtainer_slots_reserve(&io, &geometry, 1, &firmware_set,
-                                    &operation, &state) == ECONTAINER_SLOTS_OK);
-    assert(state.phase == ECONTAINER_SLOT_WRITING);
-    if (strcmp(argv[3], "changed-copy") == 0) {
-        operation.data_schema_version = 2;
-    }
     econtainer_package_workspace_t package_workspace;
     econtainer_wasm_workspace_t wasm_workspace;
     econtainer_package_info_t verified_info;
@@ -210,6 +250,38 @@ int main(int argc, char **argv)
         .wasm_workspace = &wasm_workspace,
         .verified_info = &verified_info,
     };
+    if (retired_test) {
+        assert(econtainer_slots_load(&io, &geometry, &state) == ECONTAINER_SLOTS_OK);
+        econtainer_slot_firmware_set_t prepared = firmware_set;
+        memset(prepared.bootable_firmware_sha256[1], 0x33, 32U);
+        operation.kind = ECONTAINER_SLOT_PACKAGE_REUSE;
+        memset(operation.target_firmware_sha256, 0x33, 32U);
+        operation.slot = 0U;
+        const size_t writes_before = store->read_count;
+        const econtainer_slots_result_t reused = econtainer_slots_stage_firmware(
+            &io, &geometry, state.sequence, &prepared, &operation,
+            econtainer_package_slot_validate_binding, &validation, &state);
+        if (reused != ECONTAINER_SLOTS_OK) {
+            fprintf(stderr, "retired reference incorrectly protected: mode=%s result=%d\n",
+                    argv[3], (int)reused);
+            return 1;
+        }
+        assert(state.phase == ECONTAINER_SLOT_PREPARED && state.bindings[1].present &&
+               !state.bindings[1].package_present && !store->locked &&
+               memcmp(state.bindings[1].firmware_sha256,
+                      prepared.bootable_firmware_sha256[1], 32U) == 0);
+        assert(memcmp(store->flash, package, package_size) == 0 &&
+               memcmp(store->flash + SLOT_BYTES, reference, reference_size) == 0);
+        printf("retired mode=%s legal REUSE passed reads=%zu\n", argv[3],
+               store->read_count - writes_before);
+        free(reference); free(package); free(key); free(store); return 0;
+    }
+    assert(econtainer_slots_reserve(&io, &geometry, 1, &firmware_set,
+                                    &operation, &state) == ECONTAINER_SLOTS_OK);
+    assert(state.phase == ECONTAINER_SLOT_WRITING);
+    if (strcmp(argv[3], "changed-copy") == 0) {
+        operation.data_schema_version = 2;
+    }
     if (strcmp(argv[3], "read-fault") == 0) {
         /* Hash readback uses 256-byte chunks; fail on the first validator read. */
         store->fail_after_read_count = 1U + package_size / 256U;
@@ -218,10 +290,42 @@ int main(int argc, char **argv)
         /* The third read of this offset belongs to the post-signature Wasm scan. */
         store->fail_wasm_scan_read = true;
     }
+    store->fail_reference_validator = strcmp(argv[3], "identity-read-fault") == 0;
     const source_t source = {package, package_size};
     const econtainer_slots_result_t result = econtainer_slots_write_and_prepare(
         &io, &geometry, state.sequence, source_read, (void *)&source,
         econtainer_package_slot_validate, &validation, &state);
+    if (identity_test) {
+        const bool reject = strstr(argv[3], "conflict") != NULL ||
+                            strcmp(argv[3], "identity-read-fault") == 0;
+        const econtainer_slots_result_t expected = strcmp(argv[3], "identity-read-fault") == 0 ?
+            ECONTAINER_SLOTS_IO_FAILED : reject ? ECONTAINER_SLOTS_UNTRUSTED : ECONTAINER_SLOTS_OK;
+        if (result != expected) {
+            fprintf(stderr, "identity assertion: mode=%s actual=%d expected=%d\n",
+                    argv[3], (int)result, (int)expected);
+            return 1;
+        }
+        assert(!store->locked && store->largest_read <= 512U);
+        econtainer_slots_state_t actual;
+        assert(econtainer_slots_load(&io, &geometry, &actual) == ECONTAINER_SLOTS_OK);
+        assert(actual.phase == (reject ? ECONTAINER_SLOT_WRITING : ECONTAINER_SLOT_PREPARED));
+        const unsigned binding = (strstr(argv[3], "rollback") != NULL || strcmp(argv[3], "identity-same-sha-schema-conflict") == 0) ? 1U : 0U;
+        assert(memcmp(actual.bindings[binding].package_sha256,
+                      bindings[binding].package_sha256, 32U) == 0);
+        assert(memcmp(store->flash, reference, reference_size) == 0);
+        if (reject) {
+            const uint8_t zero[sizeof verified_info] = {0};
+            assert(memcmp(&verified_info, zero, sizeof verified_info) == 0);
+            assert(econtainer_slots_abandon(&io, &geometry, actual.sequence,
+                (const uint8_t[ECONTAINER_SLOT_BOOT_ID_BYTES]){1}, NULL, NULL, &actual) ==
+                ECONTAINER_SLOTS_OK);
+            assert(actual.phase == ECONTAINER_SLOT_ABORTED);
+        }
+        if (strcmp(argv[3], "identity-same-sha") == 0)
+            assert(store->reference_verifier_reads == 0U);
+        printf("identity mode=%s result=%d reference preserved\n", argv[3], (int)result);
+        free(reference); free(package); free(key); free(store); return 0;
+    }
     if (strcmp(argv[3], "valid") == 0 || strcmp(argv[3], "reuse") == 0 ||
         strcmp(argv[3], "changed-copy") == 0) {
         assert(result == ECONTAINER_SLOTS_OK);

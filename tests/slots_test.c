@@ -238,8 +238,10 @@ static bool source_read(void *context, size_t offset_bytes,
 
 static econtainer_slot_validation_result_t validate_readback(
     void *context, const econtainer_slot_operation_t *operation,
-    econtainer_slot_read_fn read_fn, void *read_context, size_t size_bytes)
+    econtainer_slot_read_fn read_fn, void *read_context, size_t size_bytes,
+    const econtainer_slot_references_t *references)
 {
+    assert(references != NULL && references->bindings != NULL && references->read != NULL);
     fixture_t *fixture = context;
     uint8_t chunk[97];
     fixture->validation_called = true;

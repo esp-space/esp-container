@@ -450,6 +450,27 @@ static econtainer_slots_result_t hash_flash(const econtainer_slots_io_t *io,
            ECONTAINER_SLOTS_OK : ECONTAINER_SLOTS_UNTRUSTED;
 }
 
+typedef struct {
+    const econtainer_slots_io_t *io;
+    const econtainer_slots_geometry_t *geometry;
+    const econtainer_slot_binding_t *bindings;
+} reference_reader_t;
+
+static bool read_reference(void *context, unsigned binding_index,
+                           size_t offset_bytes, uint8_t *destination, size_t size_bytes)
+{
+    const reference_reader_t *reader = context;
+    if (binding_index >= ECONTAINER_SLOT_BINDING_COUNT || destination == NULL ||
+        size_bytes == 0U || size_bytes > 512U) return false;
+    const econtainer_slot_binding_t *binding = &reader->bindings[binding_index];
+    if (!binding->present || !binding->package_present ||
+        binding->slot >= ECONTAINER_SLOT_COUNT) return false;
+    const slot_reader_t package = {reader->io,
+        reader->geometry->slots[binding->slot].offset_bytes,
+        binding->package_size_bytes};
+    return flash_relative_read((void *)&package, offset_bytes, destination, size_bytes);
+}
+
 static econtainer_slots_result_t check_references(const econtainer_slots_io_t *io,
                                                    const econtainer_slots_geometry_t *geometry,
                                                    const econtainer_slots_state_t *state,
@@ -635,7 +656,11 @@ econtainer_slots_result_t econtainer_slots_with_selected_package(
      * package. The selected callback verifies the selected package completely. */
     if (result == ECONTAINER_SLOTS_OK) result = check_references(io, geometry, &current, false);
     if (result == ECONTAINER_SLOTS_OK) {
-        result = selected_fn(context, &package, geometry->slots[package.slot].offset_bytes);
+        const reference_reader_t reader = {io, geometry, current.bindings};
+        const econtainer_slot_references_t references = {
+            current.bindings, read_reference, (void *)&reader};
+        result = selected_fn(context, &package, geometry->slots[package.slot].offset_bytes,
+                             &references);
     }
     io->unlock(io->context);
     return result;
@@ -811,9 +836,12 @@ econtainer_slots_result_t econtainer_slots_stage_firmware(
         const slot_reader_t reader = {io,
             geometry->slots[operation->slot].offset_bytes,
             operation->package_size_bytes};
+        const reference_reader_t references_reader = {io, geometry, next.bindings};
+        const econtainer_slot_references_t references = {
+            next.bindings, read_reference, (void *)&references_reader};
         const econtainer_slot_validation_result_t validation = validate_fn(
             validate_context, &proposed, flash_relative_read, (void *)&reader,
-            operation->package_size_bytes);
+            operation->package_size_bytes, &references);
         result = validation == ECONTAINER_SLOT_VALIDATION_OK ? ECONTAINER_SLOTS_OK :
                  validation == ECONTAINER_SLOT_VALIDATION_IO_FAILED ?
                  ECONTAINER_SLOTS_IO_FAILED : ECONTAINER_SLOTS_UNTRUSTED;
@@ -1141,9 +1169,12 @@ econtainer_slots_result_t econtainer_slots_write_and_prepare(
         const slot_reader_t reader = {io,
             geometry->slots[current.operation.slot].offset_bytes,
             current.operation.package_size_bytes};
+        const reference_reader_t references_reader = {io, geometry, current.bindings};
+        const econtainer_slot_references_t references = {
+            current.bindings, read_reference, (void *)&references_reader};
         const econtainer_slot_validation_result_t validation = validate_fn(
             validate_context, &current.operation, flash_relative_read,
-            (void *)&reader, current.operation.package_size_bytes);
+            (void *)&reader, current.operation.package_size_bytes, &references);
         if (validation == ECONTAINER_SLOT_VALIDATION_IO_FAILED) {
             result = ECONTAINER_SLOTS_IO_FAILED;
         } else if (validation != ECONTAINER_SLOT_VALIDATION_OK) {

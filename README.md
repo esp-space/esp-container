@@ -1,5 +1,7 @@
 # ESP Container
 
+包槽准入与公开启动现拒绝仍被当前或回退固件引用的同 `product_id`／完整 `product_version` 异整包 SHA-256；随机 PSS 重签也是不同制品。普通写包、带包固件 WRITE、固件 REUSE 和公开启动共用同一槽锁内的引用校验，REUSE 只保护准备后仍保留的绑定。组件顺序复用已有验包工作区；引用 ABI/schema 对应其自身持久绑定，不套用新固件的能力额度。同 SHA 引用要求持久大小／ABI/schema 一致，并复用候选完整验签；没有版本历史库。软件边界见[三包槽检查点](docs/operations/three-slot-storage-checkpoint.md)。
+
 签名清单的 `host_call_timeout_ms` 现与公开运行限制的正数 `max_host_call_timeout_ms` 取最小值，约束四个宿主导入的每次调用。每次独立计时并在返回时裁决，超期返回 `HOST_CALL_EXPIRED`，清退本入口日志和定时器；它不代替整个 guest 入口期限，也不承诺抢占同步原生调用。软件边界与真实签名测试见[宿主导入检查点](docs/operations/host-api-checkpoint.md)。
 
 新增[异步取消检查点](docs/operations/async-cancel-checkpoint.md)：公开 WAMR `74fd95cc` 与调用方原子标志使 init／事件长循环在 owner 内协作退出，实际 guest stop 仍受独立指令预算和期限约束。两种分派的 9/9 宿主回归、各 100 次取消／回收和原生资源检查通过；Base 签名包链、固定 SDK 编译及实板仍须分别验证。

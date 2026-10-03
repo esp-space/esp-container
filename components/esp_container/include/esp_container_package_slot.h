@@ -39,13 +39,15 @@ typedef struct {
  */
 econtainer_slot_validation_result_t econtainer_package_slot_validate(
     void *context, const econtainer_slot_operation_t *operation,
-    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes);
+    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes,
+    const econtainer_slot_references_t *references);
 
 /* Recheck a confirmed package against the independently supplied policy for
  * a newly signed firmware before storing a REUSE prepared operation. */
 econtainer_slot_validation_result_t econtainer_package_slot_validate_binding(
     void *context, const econtainer_slot_binding_t *binding,
-    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes);
+    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes,
+    const econtainer_slot_references_t *references);
 
 #ifdef __cplusplus
 }

@@ -13,7 +13,8 @@ typedef struct {
 } econtainer_slot_package_t;
 
 typedef econtainer_slots_result_t (*econtainer_slot_selected_fn)(
-    void *context, const econtainer_slot_package_t *package, uint32_t offset_bytes);
+    void *context, const econtainer_slot_package_t *package, uint32_t offset_bytes,
+    const econtainer_slot_references_t *references);
 
 /* Component-private, synchronous, no durable mutation. The firmware set must
  * remain stable under Base's existing outer owner. Callback runs under the

@@ -9,6 +9,7 @@
 econtainer_slot_validation_result_t econtainer_package_slot_check(
     econtainer_package_slot_validation_t *validation,
     const econtainer_slot_package_t *package,
-    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes);
+    econtainer_slot_read_fn read_fn, void *read_context, size_t package_size_bytes,
+    const econtainer_slot_references_t *references);
 
 #endif

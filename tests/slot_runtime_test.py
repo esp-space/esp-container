@@ -35,17 +35,22 @@ def main() -> None:
             (temporary / f"p{index}-version.txt").write_text(current["product_version"], encoding="ascii")
             wasm = counter if index < 2 else counter_v2
             (temporary / f"p{index}.pkg").write_bytes(signed_package(private, wasm, current))
+        # Same public manifest/Wasm, fresh randomized PSS => a distinct package.
+        (temporary / "identity.pkg").write_bytes(signed_package(private, counter, spec))
         for name, field, limit in (("budget", "instruction_budget", 1),
                                    ("stack", "stack_limit_bytes", 8)):
             current = copy.deepcopy(spec)
             current["limits"][field] = limit
+            current["product_version"] = "v0-9-" + name
             (temporary / f"{name}.pkg").write_bytes(signed_package(private, counter, current))
         current = copy.deepcopy(spec)
         current["required_capabilities"] = ["log", "monotonic-time"]
+        current["product_version"] = "v0-9-host"
         (temporary / "host.pkg").write_bytes(signed_package(
             private, (guests / "host-api.wasm").read_bytes(), current))
         current = copy.deepcopy(spec)
         current["required_capabilities"] = ["timer"]
+        current["product_version"] = "v0-9-timer"
         (temporary / "timer.pkg").write_bytes(signed_package(
             private, (guests / "timer.wasm").read_bytes(), current))
         message_spec = json.loads((root / "examples/message-counter/spec.json").read_text())
@@ -53,13 +58,14 @@ def main() -> None:
             private, (guests / "message-counter.wasm").read_bytes(), message_spec))
         current = copy.deepcopy(spec)
         current["required_capabilities"] = ["log", "monotonic-time", "timer"]
+        current["product_version"] = "v0-9-calls"
         current["limits"]["host_call_timeout_ms"] = 100
         (temporary / "host-calls.pkg").write_bytes(signed_package(
             private, (guests / "host-calls.wasm").read_bytes(), current))
         # The static scanner intentionally leaves UTF-8/custom-section loader
         # validation to WAMR. Admission succeeds; the real loader must fail cleanly.
         (temporary / "bad-loader.pkg").write_bytes(signed_package(
-            private, counter + b"\x00\x02\x01\xff", spec))
+            private, counter + b"\x00\x02\x01\xff", dict(spec, product_version="v0-9-bad-loader")))
         subprocess.run([str(binary), str(temporary)], check=True)
 
 

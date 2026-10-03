@@ -41,7 +41,8 @@ static uint32_t minimum(uint32_t first, uint32_t second)
 }
 
 static econtainer_slots_result_t open_selected(void *context,
-    const econtainer_slot_package_t *package, uint32_t offset_bytes)
+    const econtainer_slot_package_t *package, uint32_t offset_bytes,
+    const econtainer_slot_references_t *references)
 {
     slot_runtime_open_t *open = context;
     const econtainer_slots_io_t *io = open->io;
@@ -56,7 +57,7 @@ static econtainer_slots_result_t open_selected(void *context,
         econtainer_package_slot_validation_t validation = *open->validation;
         validation.verified_info = &info;
         const econtainer_slot_validation_result_t admitted = econtainer_package_slot_check(
-            &validation, package, read_mapped, (void *)&reader, reader.size_bytes);
+            &validation, package, read_mapped, (void *)&reader, reader.size_bytes, references);
         if (admitted == ECONTAINER_SLOT_VALIDATION_IO_FAILED) {
             result = ECONTAINER_SLOTS_IO_FAILED;
         } else if (admitted != ECONTAINER_SLOT_VALIDATION_OK) {

@@ -726,6 +726,64 @@ static void run_host_call_deadlines(fixture_t *fixture, const file_t *package)
 }
 #endif
 
+static void run_retained_reference_identity(const file_t *key, const file_t *current,
+                                             const file_t *other, bool damaged)
+{
+    fixture_t *fixture = malloc(sizeof(*fixture));
+    assert(fixture != NULL);
+    initialize(fixture, key);
+    fixture->store.present = false;
+    econtainer_slot_binding_t bindings[2] = {{0}};
+    for (unsigned index = 0; index < 2U; ++index) {
+        const file_t *package = index == 0U ? current : other;
+        assert(package->size <= SLOT_BYTES);
+        uint8_t *bytes = fixture->store.flash + index * SLOT_BYTES;
+        memcpy(bytes, package->bytes, package->size);
+        if (damaged && index == 1U) bytes[512] ^= 1;
+        bindings[index].present = true;
+        bindings[index].package_present = true;
+        bindings[index].slot = (uint8_t)index;
+        bindings[index].package_size_bytes = (uint32_t)package->size;
+        bindings[index].guest_abi_version = 2U;
+        bindings[index].data_schema_version = 1U;
+        memcpy(bindings[index].firmware_sha256,
+               fixture->firmware.bootable_firmware_sha256[index], 32U);
+        assert(SHA256(bytes, package->size, bindings[index].package_sha256));
+    }
+    assert(econtainer_slots_initialize(&fixture->io, &geometry, &fixture->firmware,
+                                       bindings) == ECONTAINER_SLOTS_OK);
+    assert(econtainer_slots_load(&fixture->io, &geometry, &fixture->state) == ECONTAINER_SLOTS_OK);
+    econtainer_slot_selection_request_t request = request_for(fixture, false);
+    expect_rejection(fixture, &request, ECONTAINER_SLOTS_UNTRUSTED);
+    assert(fixture->store.mapped == fixture->store.unmapped); /* No retained mapping/runtime. */
+    econtainer_slot_firmware_set_t prepared = fixture->firmware;
+    memset(prepared.bootable_firmware_sha256[1], 0x33, 32U);
+    econtainer_slot_operation_t operation = {.kind = ECONTAINER_SLOT_PACKAGE_REUSE};
+    operation.operation_id[0] = 1U;
+    memset(operation.target_firmware_sha256, 0x33, 32U);
+    operation.slot = bindings[0].slot;
+    operation.package_size_bytes = bindings[0].package_size_bytes;
+    operation.guest_abi_version = bindings[0].guest_abi_version;
+    operation.data_schema_version = bindings[0].data_schema_version;
+    memcpy(operation.package_sha256, bindings[0].package_sha256, 32U);
+    assert(econtainer_slots_stage_firmware(&fixture->io, &geometry, fixture->state.sequence,
+        &prepared, &operation, econtainer_package_slot_validate_binding,
+        &fixture->validation, &fixture->state) == ECONTAINER_SLOTS_OK);
+    fixture->firmware = prepared;
+    request = request_for(fixture, false);
+    econtainer_runtime_t *runtime = NULL;
+    const econtainer_slot_runtime_result_t result = open_request(fixture, &request, &runtime);
+    assert(result.slots == ECONTAINER_SLOTS_OK && result.runtime == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    assert(!fixture->store.locked && fixture->store.mapped == fixture->store.unmapped);
+    assert(pthread_cond_destroy(&fixture->store.condition) == 0);
+    assert(pthread_mutex_destroy(&fixture->store.gate) == 0);
+    assert(pthread_mutex_destroy(&fixture->store.lock) == 0);
+    free(fixture);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -735,6 +793,12 @@ int main(int argc, char **argv)
                            "timer.pkg", "message-counter.pkg"};
     file_t packages[10];
     for (unsigned index = 0; index < 10; ++index) packages[index] = read_file(argv[1], names[index]);
+    file_t identity = read_file(argv[1], "identity.pkg");
+    assert(identity.size == packages[0].size &&
+           memcmp(identity.bytes, packages[0].bytes, identity.size) != 0);
+    run_retained_reference_identity(&key, &packages[0], &identity, false);
+    run_retained_reference_identity(&key, &packages[0], &identity, true);
+    free(identity.bytes);
     fixture_t *fixture = malloc(sizeof(*fixture));
     assert(fixture != NULL);
     initialize(fixture, &key);
