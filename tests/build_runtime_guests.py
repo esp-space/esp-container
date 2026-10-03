@@ -113,6 +113,10 @@ def main() -> int:
     )
     memory_command[-1] = str(args.output_dir / "memory.wasm")
     subprocess.run(memory_command, check=True)
+    host_calls_command = host_command.copy()
+    host_calls_command[host_calls_command.index(str(ROOT / "tests" / "host_api_guest.c"))] = str(ROOT / "tests" / "host_call_guest.c")
+    host_calls_command[-1] = str(args.output_dir / "host-calls.wasm")
+    subprocess.run(host_calls_command, check=True)
     return 0
 
 

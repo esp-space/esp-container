@@ -105,11 +105,12 @@ if(BUILD_TESTING)
             add_custom_command(OUTPUT ${runtime_guests}
                     "${runtime_guests_dir}/counter-v2.wasm"
                     "${runtime_guests_dir}/message-counter.wasm"
+                    "${runtime_guests_dir}/host-calls.wasm"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/build_runtime_guests.py"
                     --wasi-sdk "${ESP_CONTAINER_WASI_SDK_ROOT}"
                     --output-dir "${runtime_guests_dir}"
                 DEPENDS tests/build_runtime_guests.py tests/runtime_guest.c tests/host_api_guest.c
-                    tests/timer_guest.c tests/deadline_guest.c tests/memory_guest.c
+                    tests/timer_guest.c tests/deadline_guest.c tests/memory_guest.c tests/host_call_guest.c
                     tools/counter_guest.py examples/counter/counter.c
                     examples/counter-v2/counter.c
                     tools/message_counter_guest.py tools/product_package.py
@@ -119,7 +120,8 @@ if(BUILD_TESTING)
                 VERBATIM)
             add_custom_target(runtime_guest_fixtures DEPENDS ${runtime_guests}
                 "${runtime_guests_dir}/counter-v2.wasm"
-                "${runtime_guests_dir}/message-counter.wasm")
+                "${runtime_guests_dir}/message-counter.wasm"
+                "${runtime_guests_dir}/host-calls.wasm")
             add_executable(runtime_instance_test tests/runtime_instance_test.c)
             find_package(Threads REQUIRED)
             target_include_directories(runtime_instance_test PRIVATE components/esp_container/src)
@@ -140,6 +142,26 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/slot_runtime_test.py"
                     "$<TARGET_FILE:slot_runtime_test>" "${runtime_guests_dir}")
             set_tests_properties(slot_runtime PROPERTIES TIMEOUT 30)
+            # The test-only library compiles the actual runtime with a deterministic
+            # clock symbol; neither public API nor WAMR platform clock changes.
+            get_target_property(container_sources esp_container SOURCES)
+            add_library(esp_container_host_clock STATIC ${container_sources})
+            target_compile_features(esp_container_host_clock PUBLIC c_std_11)
+            target_include_directories(esp_container_host_clock PUBLIC components/esp_container/include)
+            target_include_directories(esp_container_host_clock PRIVATE components/esp_container/src)
+            target_compile_definitions(esp_container_host_clock PRIVATE
+                clock_gettime=econtainer_test_clock_gettime WASM_ENABLE_CLASSIC_WALL_CLOCK_LIMIT=1)
+            target_compile_options(esp_container_host_clock PRIVATE -Wall -Wextra -Werror -Wconversion)
+            target_link_libraries(esp_container_host_clock PUBLIC OpenSSL::Crypto vmlib)
+            add_executable(host_call_timeout_test tests/slot_runtime_test.c)
+            target_compile_definitions(host_call_timeout_test PRIVATE ECONTAINER_TEST_HOST_CLOCK=1)
+            target_compile_options(host_call_timeout_test PRIVATE -Wall -Wextra -Werror -Wconversion -UNDEBUG)
+            target_link_libraries(host_call_timeout_test PRIVATE esp_container_host_clock Threads::Threads)
+            add_dependencies(host_call_timeout_test runtime_guest_fixtures)
+            add_test(NAME host_call_timeout
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/slot_runtime_test.py"
+                    "$<TARGET_FILE:host_call_timeout_test>" "${runtime_guests_dir}")
+            set_tests_properties(host_call_timeout PROPERTIES TIMEOUT 30)
         endif()
     endif()
 endif()

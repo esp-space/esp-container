@@ -71,6 +71,8 @@ static econtainer_slots_result_t open_selected(void *context,
             limits.max_memory_pages = minimum(limits.max_memory_pages,
                                                 info.memory_limit_bytes / 65536U);
             limits.stack_size_bytes = minimum(limits.stack_size_bytes, info.stack_limit_bytes);
+            limits.max_host_call_timeout_ms = minimum(
+                limits.max_host_call_timeout_ms, info.host_call_timeout_ms);
             limits.allowed_capabilities &= validation.wasm_authorization.allowed_capabilities &
                                            info.requested_capabilities;
             if ((limits.allowed_capabilities & ECONTAINER_CAP_LOG) == 0) limits.max_log_bytes = 0;

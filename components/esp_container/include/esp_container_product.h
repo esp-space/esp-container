@@ -30,6 +30,8 @@ typedef struct {
     /* Classic opcode checks are cooperative; native imports/OS scheduling
      * cannot be preempted. */
     uint32_t max_entry_duration_ms;
+    /* Positive per-import budget, checked on return; native code is not preempted. */
+    uint32_t max_host_call_timeout_ms;
     /* NULL means this owner does not accept asynchronous cancellation. The
      * predicate aborts init/events; guest stop retains its own budget/deadline. */
     econtainer_cancel_query_t cancel_requested;
@@ -52,6 +54,7 @@ typedef enum {
     ECONTAINER_RUNTIME_NOT_AUTHORIZED,
     ECONTAINER_RUNTIME_ENTRY_EXPIRED,
     ECONTAINER_RUNTIME_ENTRY_CANCELLED,
+    ECONTAINER_RUNTIME_HOST_CALL_EXPIRED,
 } econtainer_runtime_result_t;
 
 typedef struct {

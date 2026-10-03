@@ -51,6 +51,11 @@ def main() -> None:
         message_spec = json.loads((root / "examples/message-counter/spec.json").read_text())
         (temporary / "message-counter.pkg").write_bytes(signed_package(
             private, (guests / "message-counter.wasm").read_bytes(), message_spec))
+        current = copy.deepcopy(spec)
+        current["required_capabilities"] = ["log", "monotonic-time", "timer"]
+        current["limits"]["host_call_timeout_ms"] = 100
+        (temporary / "host-calls.pkg").write_bytes(signed_package(
+            private, (guests / "host-calls.wasm").read_bytes(), current))
         # The static scanner intentionally leaves UTF-8/custom-section loader
         # validation to WAMR. Admission succeeds; the real loader must fail cleanly.
         (temporary / "bad-loader.pkg").write_bytes(signed_package(

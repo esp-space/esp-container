@@ -29,6 +29,8 @@
 #define ECONTAINER_TIMER_CAPACITY 8U
 #define ECONTAINER_TIMER_MAX_INTERVAL_MS 86400000U
 #define ECONTAINER_ENTRY_EXPIRED_REASON "container entry expired"
+#define ECONTAINER_HOST_CALL_EXPIRED_REASON "container host call expired"
+#define ECONTAINER_HOST_CALL_CLOCK_FAILED_REASON "container host call clock failed"
 
 typedef struct {
     uint64_t handle;
@@ -89,7 +91,8 @@ static bool limits_valid(const econtainer_runtime_limits_t *limits)
            limits->init_instruction_budget > 0 &&
            limits->event_instruction_budget > 0 &&
            limits->stop_instruction_budget > 0 &&
-           limits->max_entry_duration_ms > 0;
+           limits->max_entry_duration_ms > 0 &&
+           limits->max_host_call_timeout_ms > 0;
 }
 
 static bool function_type_matches(wasm_func_type_t type, uint32_t param_count)
@@ -241,7 +244,8 @@ static bool cancellation_requested(void *context)
     return false;
 }
 
-static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
+static econtainer_runtime_t *native_owner(wasm_exec_env_t environment,
+                                          uint64_t *began_us)
 {
     econtainer_runtime_t *runtime =
         wasm_runtime_get_function_attachment(environment);
@@ -256,7 +260,7 @@ static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
     uint64_t now_us = 0;
     if (!monotonic_us(&now_us)) {
         wasm_runtime_set_exception(runtime->instance,
-                                   "Exception: monotonic clock failed");
+                                   ECONTAINER_HOST_CALL_CLOCK_FAILED_REASON);
         return NULL;
     }
     if (now_us >= runtime->entry_deadline_us) {
@@ -269,7 +273,39 @@ static econtainer_runtime_t *native_owner(wasm_exec_env_t environment)
         wasm_runtime_set_exception(runtime->instance, "execution cancelled");
         return NULL;
     }
+    const uint64_t duration_us =
+        (uint64_t)runtime->limits.max_host_call_timeout_ms * 1000U;
+    if (now_us > UINT64_MAX - duration_us) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   ECONTAINER_HOST_CALL_CLOCK_FAILED_REASON);
+        return NULL;
+    }
+    *began_us = now_us;
     return runtime;
+}
+
+/* Every owned native return, including argument/quota rejection, reaches this
+ * check. Synchronous native work cannot be preempted; no expired result is
+ * delivered as a successful guest entry. Earlier WAMR exceptions are retained. */
+static void native_finish(econtainer_runtime_t *runtime, uint64_t began_us)
+{
+    uint64_t ended_us = 0;
+    const bool clock_ok = monotonic_us(&ended_us);
+    if (wasm_runtime_get_exception(runtime->instance) != NULL) return;
+    if (!clock_ok || ended_us < began_us) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   ECONTAINER_HOST_CALL_CLOCK_FAILED_REASON);
+    } else if (ended_us >= runtime->entry_deadline_us) {
+        runtime->entry_expired = true;
+        wasm_runtime_set_exception(runtime->instance,
+                                   ECONTAINER_ENTRY_EXPIRED_REASON);
+    } else if (cancellation_requested(runtime)) {
+        wasm_runtime_set_exception(runtime->instance, "execution cancelled");
+    } else if (ended_us >= began_us +
+               (uint64_t)runtime->limits.max_host_call_timeout_ms * 1000U) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   ECONTAINER_HOST_CALL_EXPIRED_REASON);
+    }
 }
 
 static bool monotonic_us(uint64_t *result)
@@ -297,15 +333,11 @@ static bool monotonic_ms(uint64_t *result)
     return true;
 }
 
-static uint64_t native_monotonic_ms(wasm_exec_env_t environment)
+static uint64_t native_monotonic_ms_body(econtainer_runtime_t *runtime)
 {
-    econtainer_runtime_t *runtime = native_owner(environment);
-    if (runtime == NULL ||
-        (runtime->limits.allowed_capabilities & ECONTAINER_CAP_MONOTONIC_TIME) == 0) {
-        if (runtime != NULL) {
-            wasm_runtime_set_exception(runtime->instance,
-                                       "Exception: container clock not authorized");
-        }
+    if ((runtime->limits.allowed_capabilities & ECONTAINER_CAP_MONOTONIC_TIME) == 0) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   "Exception: container clock not authorized");
         return 0;
     }
     uint64_t now_ms = 0;
@@ -317,16 +349,12 @@ static uint64_t native_monotonic_ms(wasm_exec_env_t environment)
     return now_ms;
 }
 
-static int32_t native_log(wasm_exec_env_t environment, uint32_t offset,
-                          uint32_t size_bytes)
+static int32_t native_log_body(econtainer_runtime_t *runtime, uint32_t offset,
+                               uint32_t size_bytes)
 {
-    econtainer_runtime_t *runtime = native_owner(environment);
-    if (runtime == NULL ||
-        (runtime->limits.allowed_capabilities & ECONTAINER_CAP_LOG) == 0) {
-        if (runtime != NULL) {
-            wasm_runtime_set_exception(runtime->instance,
-                                       "Exception: container log not authorized");
-        }
+    if ((runtime->limits.allowed_capabilities & ECONTAINER_CAP_LOG) == 0) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   "Exception: container log not authorized");
         return -1;
     }
     if (size_bytes == 0 || size_bytes > runtime->limits.max_log_bytes) {
@@ -349,15 +377,12 @@ static int32_t native_log(wasm_exec_env_t environment, uint32_t offset,
     return 0;
 }
 
-static uint64_t native_timer_start(wasm_exec_env_t environment,
-                                   uint32_t delay_ms, uint32_t period_ms)
+static uint64_t native_timer_start_body(econtainer_runtime_t *runtime,
+                                        uint32_t delay_ms, uint32_t period_ms)
 {
-    econtainer_runtime_t *runtime = native_owner(environment);
-    if (runtime == NULL ||
-        (runtime->limits.allowed_capabilities & ECONTAINER_CAP_TIMER) == 0) {
-        if (runtime != NULL)
-            wasm_runtime_set_exception(runtime->instance,
-                                       "Exception: container timer not authorized");
+    if ((runtime->limits.allowed_capabilities & ECONTAINER_CAP_TIMER) == 0) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   "Exception: container timer not authorized");
         return 0;
     }
     if (runtime->stopping ||
@@ -462,14 +487,11 @@ static econtainer_runtime_result_t prepare_sections(
     return ECONTAINER_RUNTIME_OK;
 }
 
-static int32_t native_timer_cancel(wasm_exec_env_t environment, uint64_t handle)
+static int32_t native_timer_cancel_body(econtainer_runtime_t *runtime, uint64_t handle)
 {
-    econtainer_runtime_t *runtime = native_owner(environment);
-    if (runtime == NULL ||
-        (runtime->limits.allowed_capabilities & ECONTAINER_CAP_TIMER) == 0) {
-        if (runtime != NULL)
-            wasm_runtime_set_exception(runtime->instance,
-                                       "Exception: container timer not authorized");
+    if ((runtime->limits.allowed_capabilities & ECONTAINER_CAP_TIMER) == 0) {
+        wasm_runtime_set_exception(runtime->instance,
+                                   "Exception: container timer not authorized");
         return -1;
     }
     if (runtime->stopping || handle == 0) return -1;
@@ -481,6 +503,48 @@ static int32_t native_timer_cancel(wasm_exec_env_t environment, uint64_t handle)
         }
     }
     return -1;
+}
+
+static uint64_t native_monotonic_ms(wasm_exec_env_t environment)
+{
+    uint64_t began_us = 0;
+    econtainer_runtime_t *runtime = native_owner(environment, &began_us);
+    if (runtime == NULL) return 0;
+    const uint64_t result = native_monotonic_ms_body(runtime);
+    native_finish(runtime, began_us);
+    return result;
+}
+
+static int32_t native_log(wasm_exec_env_t environment, uint32_t offset,
+                          uint32_t size_bytes)
+{
+    uint64_t began_us = 0;
+    econtainer_runtime_t *runtime = native_owner(environment, &began_us);
+    if (runtime == NULL) return -1;
+    const int32_t result = native_log_body(runtime, offset, size_bytes);
+    native_finish(runtime, began_us);
+    return result;
+}
+
+static uint64_t native_timer_start(wasm_exec_env_t environment,
+                                   uint32_t delay_ms, uint32_t period_ms)
+{
+    uint64_t began_us = 0;
+    econtainer_runtime_t *runtime = native_owner(environment, &began_us);
+    if (runtime == NULL) return 0;
+    const uint64_t result = native_timer_start_body(runtime, delay_ms, period_ms);
+    native_finish(runtime, began_us);
+    return result;
+}
+
+static int32_t native_timer_cancel(wasm_exec_env_t environment, uint64_t handle)
+{
+    uint64_t began_us = 0;
+    econtainer_runtime_t *runtime = native_owner(environment, &began_us);
+    if (runtime == NULL) return -1;
+    const int32_t result = native_timer_cancel_body(runtime, handle);
+    native_finish(runtime, began_us);
+    return result;
 }
 
 econtainer_runtime_result_t econtainer_runtime_open(const uint8_t *wasm,
@@ -666,10 +730,20 @@ static econtainer_runtime_result_t invoke(econtainer_runtime_t *runtime,
          strcmp(exception, "Exception: execution cancelled") == 0)) {
         return cancel_entry(runtime, prior_log_size);
     }
+    if (!call_ok && exception != NULL &&
+        strcmp(exception, "Exception: wall clock deadline exceeded") == 0)
+        return expire_entry(runtime, prior_log_size);
+    if (exception != NULL &&
+        strcmp(exception, "Exception: " ECONTAINER_HOST_CALL_EXPIRED_REASON) == 0) {
+        (void)expire_entry(runtime, prior_log_size);
+        return ECONTAINER_RUNTIME_HOST_CALL_EXPIRED;
+    }
+    if (exception != NULL &&
+        strcmp(exception, "Exception: " ECONTAINER_HOST_CALL_CLOCK_FAILED_REASON) == 0) {
+        (void)expire_entry(runtime, prior_log_size);
+        return ECONTAINER_RUNTIME_ENGINE_FAILURE;
+    }
     if (!call_ok) {
-        if (exception != NULL &&
-            strcmp(exception, "Exception: wall clock deadline exceeded") == 0)
-            return expire_entry(runtime, prior_log_size);
         runtime->state = ECONTAINER_RUNTIME_FAILED;
         return exception != NULL &&
                        strcmp(exception, "Exception: instruction limit exceeded") == 0

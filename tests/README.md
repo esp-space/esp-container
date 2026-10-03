@@ -1,5 +1,7 @@
 # 测试入口
 
+`host_call_timeout` 复用 `slot_runtime` 的真实签名包、公开产品 API、假 Flash/NVS 与锁定 WAMR。仅独立测试库把实际 `runtime.c` 的 POSIX 时钟符号接到确定性夹具；WAMR 平台时钟和生产运行配置不变。它验证签名 100 ms 与平台 500 ms/20 ms 的双向交集，四种导入的成功、非法参数、日志 busy 和 timer 满槽返回，四个各自合法短调用的总耗时超过 100 ms 仍成功，以及 init/stop、既有引擎异常、入口超期、取消优先级和时钟失败/回退/加法溢出。超期不交付 guest 结果；旧日志保留、新日志丢弃，失败实例拒绝 timer 投递，关闭重开无旧资源。加法溢出夹具只证明软件边界，准备阶段使用未来时钟偏移避免真实解释器期限抢先，不是宿主或实板墙钟测量。
+
 `runtime_instance` 使用真正的宿主请求线程和 owner 原子谓词，验证 init／事件长循环取消、保留既有日志并丢弃取消入口新日志、定时器取消、实际 guest stop 和停止失败阻断；另有 100 次取消／关闭／重开及 10/50/100 次原生资源采样。goto／switch 分派和 ASan/UBSan 结果见[异步取消检查点](../docs/operations/async-cancel-checkpoint.md)。
 
 `slot_runtime` 新增真实签名[消息计数产品](../examples/message-counter/README.md)，使用原公开 product API 与一个 timer 配额验证消息／三态／真实到期／停止取消、同 boot 重开归零和旧确认包恢复。清单声明零持久数据；Flash/NVS、固件集合与健康仍为宿主夹具，未走 Base 公开网络安装或设备健康确认。

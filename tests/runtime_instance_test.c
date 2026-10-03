@@ -39,6 +39,7 @@ static const econtainer_runtime_limits_t limits = {
     .event_instruction_budget = 1000,
     .stop_instruction_budget = 1000,
     .max_entry_duration_ms = 1000,
+    .max_host_call_timeout_ms = 100,
 };
 
 #ifdef ECONTAINER_TEST_RESOURCE_STATS

@@ -1,5 +1,7 @@
 # ESP Container
 
+签名清单的 `host_call_timeout_ms` 现与公开运行限制的正数 `max_host_call_timeout_ms` 取最小值，约束四个宿主导入的每次调用。每次独立计时并在返回时裁决，超期返回 `HOST_CALL_EXPIRED`，清退本入口日志和定时器；它不代替整个 guest 入口期限，也不承诺抢占同步原生调用。软件边界与真实签名测试见[宿主导入检查点](docs/operations/host-api-checkpoint.md)。
+
 新增[异步取消检查点](docs/operations/async-cancel-checkpoint.md)：公开 WAMR `74fd95cc` 与调用方原子标志使 init／事件长循环在 owner 内协作退出，实际 guest stop 仍受独立指令预算和期限约束。两种分派的 9/9 宿主回归、各 100 次取消／回收和原生资源检查通过；Base 签名包链、固定 SDK 编译及实板仍须分别验证。
 
 新增[消息计数产品样例](examples/message-counter/README.md)：counter v0-2-0 在原 ABI／包格式下提供二进制消息计数、三态与单个 100 ms 定时窗口，声明 timer 能力和零持久数据。公开固定构建器与签名包槽宿主回归可独立执行；保持 Base 现有精确依赖，双板正式安装仍待验收，不扩大平台授权。

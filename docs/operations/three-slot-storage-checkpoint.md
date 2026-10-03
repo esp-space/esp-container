@@ -87,7 +87,7 @@ Base 只可在 `PREPARED` 持久读回后调用 OTA 选择；新镜像实际启�
 
 IDF provider 的 `flash_map/flash_unmap` 是可选的存储回调、必需的私有装载能力。它先检查真实专用分区边界，再使用 `esp_partition_mmap(DATA | BLOCKS_WRITE)`；SDK 负责非页对齐地址和返回指针调整。成功映射无论后续授权或 WAMR 是否成功，均在解锁前解除；映射失败不留下句柄，成功但 NULL 指针也会清理。映射活跃时不执行 NVS commit 或包擦写，避免 `BLOCKS_WRITE` 阻塞自己。`runtime_open` 不执行 guest，并在返回前拥有 WAMR 所需 code/data 副本，因此映射不延长到 `init/event/stop/close` 生命周期。
 
-签名请求与独立 runtime policy 在连接处共同限制 Wasm 大小、内存页、执行栈、三个入口指令预算；能力取 signed requested、静态独立 grant 与运行 policy 的交集，签名不能自行授权。非法 policy 不产生实例。host heap、单事件字节、日志长度、定时器个数和整个入口的 `max_entry_duration_ms` 仍是独立平台参数。事件队列、持久存储和单次 `host_call_timeout_ms` 没有在当前 runtime 中实现；其签名上限继续经过准入，不能称为运行期已执行，更不能把单次宿主期限偷换成整个 guest 入口期限。
+签名请求与独立 runtime policy 在连接处共同限制 Wasm 大小、内存页、执行栈、三个入口指令预算；能力取 signed requested、静态独立 grant 与运行 policy 的交集，签名不能自行授权。非法 policy 不产生实例。host heap、单事件字节、日志长度、定时器个数和整个入口的 `max_entry_duration_ms` 仍是独立平台参数。截至本段 2026-09-24 检查点，事件队列、持久存储和单次 `host_call_timeout_ms` 尚未进入 runtime。2026-10-04 已将验签后的单次宿主期限与平台正数运行限制取最小值，四导入各自独立计时并在返回时裁决，见[宿主导入检查点](host-api-checkpoint.md)；整个 guest 入口期限仍独立，后置裁决不证明阻塞可抢占或硬返回上界。
 
 返回结构分别保留 `slots` 和 `runtime`：装载前的存储/身份/授权失败使 runtime 保持 `INVALID_STATE`；存储与授权成功但 WAMR 忙或装载失败时，slots 可为 OK、runtime 为具体错误。只有两者均为 OK 且输出实例非 NULL 才能继续 `init`。失败不会给调用方留下部分实例；实际 runtime 内部失败统一回收其资源，连接层负责映射和槽锁，不建立第二套 close 所有权。
 

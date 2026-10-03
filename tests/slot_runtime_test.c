@@ -9,6 +9,42 @@
 #include <sys/mman.h>
 #include <time.h>
 
+
+#ifdef ECONTAINER_TEST_HOST_CLOCK
+/* Only the separately compiled runtime test library uses this clock symbol.
+ * WAMR's interpreter continues to use its real platform clock. */
+static uint64_t clock_step_us;
+static uint64_t clock_now_us;
+static unsigned clock_reads;
+static unsigned clock_fail_at;
+static unsigned clock_backwards_at;
+
+static void set_test_clock(uint64_t step_us, unsigned fail_at, unsigned backwards_at)
+{
+    struct timespec real;
+    assert(clock_gettime(CLOCK_MONOTONIC, &real) == 0);
+    clock_now_us = (uint64_t)real.tv_sec * 1000000U + (uint64_t)real.tv_nsec / 1000U;
+    clock_step_us = step_us;
+    clock_reads = 0;
+    clock_fail_at = fail_at;
+    clock_backwards_at = backwards_at;
+}
+
+int econtainer_test_clock_gettime(clockid_t kind, struct timespec *out)
+{
+    if (clock_step_us == 0 && clock_fail_at == 0 && clock_backwards_at == 0)
+        return clock_gettime(kind, out);
+    assert(kind == CLOCK_MONOTONIC);
+    ++clock_reads;
+    if (clock_reads == clock_fail_at) return -1;
+    if (clock_reads == clock_backwards_at) clock_now_us -= 1000000U;
+    else clock_now_us += clock_step_us;
+    out->tv_sec = (time_t)(clock_now_us / 1000000U);
+    out->tv_nsec = (long)((clock_now_us % 1000000U) * 1000U);
+    return 0;
+}
+#endif
+
 enum { FLASH_BASE = 0x10000, SLOT_BYTES = 32768, FLASH_BYTES = 3 * SLOT_BYTES };
 typedef struct { uint8_t *bytes; size_t size; } file_t;
 typedef struct {
@@ -247,6 +283,7 @@ static void initialize(fixture_t *fixture, const file_t *key)
         .allowed_capabilities = ECONTAINER_CAP_ALL, .max_log_bytes = 16, .max_timers = 1,
         .init_instruction_budget = 200000, .event_instruction_budget = 200000,
         .stop_instruction_budget = 200000, .max_entry_duration_ms = 1000,
+        .max_host_call_timeout_ms = 500,
     };
     fixture->boot[0] = 0x55;
 }
@@ -491,6 +528,204 @@ static void run_message_counter(fixture_t *fixture, const file_t *package)
     puts("message_counter: signed message/state/one-timer behavior, stop/reopen and old package restore passed");
 }
 
+
+#ifdef ECONTAINER_TEST_HOST_CLOCK
+static econtainer_runtime_t *open_host_calls(fixture_t *fixture)
+{
+    const econtainer_slot_selection_request_t request = request_for(fixture, true);
+    econtainer_runtime_t *runtime = NULL;
+    const econtainer_slot_runtime_result_t opened = open_request(fixture, &request, &runtime);
+    assert(opened.slots == ECONTAINER_SLOTS_OK && opened.runtime == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_OK);
+    return runtime;
+}
+
+static void host_event(econtainer_runtime_t *runtime, uint8_t event, int32_t expected)
+{
+    int32_t result = 1234;
+    assert(econtainer_product_on_event(runtime, &event, 1, &result) == ECONTAINER_RUNTIME_OK);
+    if (result != expected) {
+        fprintf(stderr, "host event %u: expected %d, got %d\n", event, expected, result);
+        exit(1);
+    }
+}
+
+static void check_host_expiration(fixture_t *fixture, uint8_t event, bool prior_log,
+                                  bool prior_timer)
+{
+    econtainer_runtime_t *runtime = open_host_calls(fixture);
+    if (prior_log) host_event(runtime, 1, 0);
+    if (prior_timer) host_event(runtime, 4, 0);
+    /* Signed 100 ms beats the independent 500 ms platform grant. Even the
+     * clock import's two reads stay below the separate 1000 ms entry budget. */
+    set_test_clock(150000U, 0, 0);
+    int32_t result = 1234;
+    const econtainer_runtime_result_t status =
+        econtainer_product_on_event(runtime, &event, 1, &result);
+    set_test_clock(0, 0, 0);
+    assert(status == ECONTAINER_RUNTIME_HOST_CALL_EXPIRED && result == 1234);
+    assert(econtainer_product_on_event(runtime, &event, 1, &result) == ECONTAINER_RUNTIME_INVALID_STATE);
+    uint64_t deadline = 0;
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline) == ECONTAINER_RUNTIME_INVALID_STATE);
+    uint8_t log[16]; size_t size = 0;
+    const econtainer_runtime_result_t logged = econtainer_product_take_log(runtime, log, sizeof log, &size);
+    assert(logged == (prior_log ? ECONTAINER_RUNTIME_OK : ECONTAINER_RUNTIME_NO_LOG));
+    if (prior_log) assert(size == 3 && memcmp(log, "new", 3) == 0);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+    runtime = open_host_calls(fixture);
+    assert(econtainer_product_next_timer_deadline(runtime, &deadline) == ECONTAINER_RUNTIME_NO_TIMER);
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+}
+
+static bool cancel_after_native(void *context)
+{
+    (void)context;
+    return clock_reads >= 3;
+}
+
+static void run_host_call_deadlines(fixture_t *fixture, const file_t *package)
+{
+    fixture->limits.max_host_call_timeout_ms = 500;
+    prepare(fixture, package);
+    begin_trial(fixture);
+    econtainer_runtime_t *normal = open_host_calls(fixture);
+    host_event(normal, 2, -1);
+    host_event(normal, 5, -1);
+    host_event(normal, 7, -1);
+    host_event(normal, 1, 0);
+    host_event(normal, 1, -2);
+    uint8_t normal_log[16]; size_t normal_size = 0;
+    assert(econtainer_product_take_log(normal, normal_log, sizeof normal_log, &normal_size) == ECONTAINER_RUNTIME_OK);
+    assert(normal_size == 3 && memcmp(normal_log, "new", 3) == 0);
+    host_event(normal, 4, 0);
+    host_event(normal, 4, -1);
+    host_event(normal, 6, 0);
+    host_event(normal, 6, -1);
+    host_event(normal, 8, 0);
+    assert(econtainer_product_stop(normal) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_close(&normal) == ECONTAINER_RUNTIME_OK);
+    /* Four imports, including invalid and busy return branches. */
+    check_host_expiration(fixture, 1, false, false);
+    check_host_expiration(fixture, 2, false, false);
+    check_host_expiration(fixture, 1, true, false);
+    check_host_expiration(fixture, 4, false, false);
+    check_host_expiration(fixture, 5, false, false);
+    check_host_expiration(fixture, 4, false, true);
+    check_host_expiration(fixture, 6, false, true);
+    check_host_expiration(fixture, 7, false, false);
+    check_host_expiration(fixture, 8, false, false);
+    econtainer_runtime_t *runtime = open_host_calls(fixture);
+    set_test_clock(20000U, 0, 0);
+    host_event(runtime, 9, 4); /* four <100 ms calls, sum >100 ms, entry <1000 ms */
+    assert(clock_reads * 20000U > 100000U && clock_reads * 20000U < 1000000U);
+    set_test_clock(0, 0, 0);
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    /* A tighter platform grant also applies, independently of signed 100 ms. */
+    fixture->limits.max_host_call_timeout_ms = 20;
+    runtime = open_host_calls(fixture);
+    set_test_clock(20000U, 0, 0);
+    int32_t value = 1234; uint8_t event = 1;
+    assert(econtainer_product_on_event(runtime, &event, 1, &value) == ECONTAINER_RUNTIME_HOST_CALL_EXPIRED);
+    assert(value == 1234);
+    set_test_clock(0, 0, 0);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    fixture->limits.max_host_call_timeout_ms = 500;
+    /* Clock failure/backward at the log import's completion cannot succeed. */
+    for (unsigned backwards = 0; backwards < 2; ++backwards) {
+        runtime = open_host_calls(fixture);
+        set_test_clock(1000U, backwards ? 0 : 3, backwards ? 3 : 0);
+        assert(econtainer_product_on_event(runtime, &event, 1, &value) == ECONTAINER_RUNTIME_ENGINE_FAILURE);
+        set_test_clock(0, 0, 0);
+        uint8_t log[16]; size_t size = 0;
+        assert(econtainer_product_take_log(runtime, log, sizeof log, &size) == ECONTAINER_RUNTIME_NO_LOG);
+        assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    }
+    /* An existing WAMR bad-address trap wins over the newly elapsed host limit. */
+    runtime = open_host_calls(fixture);
+    event = 3;
+    set_test_clock(150000U, 0, 0);
+    assert(econtainer_product_on_event(runtime, &event, 1, &value) == ECONTAINER_RUNTIME_ENGINE_FAILURE);
+    set_test_clock(0, 0, 0);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    /* Entry expiration and owner cancellation retain their original precedence. */
+    fixture->limits.max_entry_duration_ms = 300;
+    runtime = open_host_calls(fixture);
+    event = 1;
+    set_test_clock(150000U, 0, 0);
+    assert(econtainer_product_on_event(runtime, &event, 1, &value) == ECONTAINER_RUNTIME_ENTRY_EXPIRED);
+    set_test_clock(0, 0, 0);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    fixture->limits.max_entry_duration_ms = 1000;
+    fixture->limits.cancel_requested = cancel_after_native;
+    runtime = open_host_calls(fixture);
+    set_test_clock(150000U, 0, 0);
+    assert(econtainer_product_on_event(runtime, &event, 1, &value) == ECONTAINER_RUNTIME_ENTRY_CANCELLED);
+    set_test_clock(0, 0, 0);
+    /* Stop ignores the caller cancellation predicate, while retaining its budgets. */
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    fixture->limits.cancel_requested = NULL;
+    /* Init and stop imports each receive a fresh host-call budget as well. */
+    const econtainer_slot_selection_request_t selected = request_for(fixture, true);
+    econtainer_slot_runtime_result_t opened = open_request(fixture, &selected, &runtime);
+    assert(opened.slots == ECONTAINER_SLOTS_OK && opened.runtime == ECONTAINER_RUNTIME_OK);
+    set_test_clock(70000U, 0, 0);
+    assert(econtainer_product_init(runtime) == ECONTAINER_RUNTIME_HOST_CALL_EXPIRED);
+    set_test_clock(0, 0, 0);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    runtime = open_host_calls(fixture);
+    set_test_clock(70000U, 0, 0);
+    assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_HOST_CALL_EXPIRED);
+    set_test_clock(0, 0, 0);
+    assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    /* New host begin clock failure/overflow uses the same per-entry cleanup.
+     * Earlier successful log is retained, timers cannot be delivered, and a
+     * closed/reopened instance has neither logs nor timers. A near-UINT64_MAX
+     * POSIX fixture is a software boundary, not an ESP int64 clock scenario. */
+    for (unsigned overflow = 0; overflow < 2; ++overflow) {
+        fixture->limits.max_entry_duration_ms = overflow ? 1 : 1000;
+        set_test_clock(1U, 0, 0);
+        /* Preparation includes real signature/WAMR work while its platform
+         * clock stays real. Keep this fixture's tiny logical entry deadline
+         * safely ahead of that clock; it does not measure wall-clock latency. */
+        clock_now_us += 1000000U;
+        runtime = open_host_calls(fixture);
+        host_event(runtime, 4, 0);
+        host_event(runtime, 1, 0);
+        set_test_clock(100U, overflow ? 0 : 2, 0);
+        if (overflow) clock_now_us = UINT64_MAX - 1500U;
+        event = 8; value = 1234;
+        assert(econtainer_product_on_event(runtime, &event, 1, &value) == ECONTAINER_RUNTIME_ENGINE_FAILURE);
+        assert(value == 1234);
+        set_test_clock(0, 0, 0);
+        uint8_t log[16]; size_t size = 0;
+        assert(econtainer_product_take_log(runtime, log, sizeof log, &size) == ECONTAINER_RUNTIME_OK);
+        assert(size == 3 && memcmp(log, "new", 3) == 0);
+        assert(econtainer_product_take_log(runtime, log, sizeof log, &size) == ECONTAINER_RUNTIME_NO_LOG);
+        uint64_t deadline = 0;
+        assert(econtainer_product_next_timer_deadline(runtime, &deadline) == ECONTAINER_RUNTIME_INVALID_STATE);
+        assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_INVALID_STATE);
+        assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
+        fixture->limits.max_entry_duration_ms = 1000;
+        runtime = open_host_calls(fixture);
+        assert(econtainer_product_next_timer_deadline(runtime, &deadline) == ECONTAINER_RUNTIME_NO_TIMER);
+        assert(econtainer_product_take_log(runtime, log, sizeof log, &size) == ECONTAINER_RUNTIME_NO_LOG);
+        assert(econtainer_product_stop(runtime) == ECONTAINER_RUNTIME_OK);
+        assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK);
+    }
+    fixture->limits.max_host_call_timeout_ms = 0;
+    const econtainer_slot_selection_request_t request = request_for(fixture, true);
+    const econtainer_slot_runtime_result_t rejected = open_request(fixture, &request, &runtime);
+    assert(rejected.slots == ECONTAINER_SLOTS_OK && rejected.runtime == ECONTAINER_RUNTIME_INVALID_INPUT && runtime == NULL);
+    fixture->limits.max_host_call_timeout_ms = 500;
+    abandon(fixture);
+    run_counter(fixture, false, 6);
+    puts("host_call_timeout: real signed limits, four imports/all returns, independent calls, cleanup/reopen passed");
+}
+#endif
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -679,6 +914,11 @@ int main(int argc, char **argv)
     assert(econtainer_product_close(&runtime) == ECONTAINER_RUNTIME_OK && runtime == NULL);
     abandon(fixture);
     run_message_counter(fixture, &packages[9]);
+#ifdef ECONTAINER_TEST_HOST_CLOCK
+    file_t host_calls = read_file(argv[1], "host-calls.pkg");
+    run_host_call_deadlines(fixture, &host_calls);
+    free(host_calls.bytes);
+#endif
     assert(fixture->store.mapped == fixture->store.unmapped && !fixture->store.locked);
     assert(pthread_cond_destroy(&fixture->store.condition) == 0);
     assert(pthread_mutex_destroy(&fixture->store.gate) == 0);
